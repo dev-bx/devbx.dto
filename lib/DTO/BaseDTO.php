@@ -2,12 +2,13 @@
 
 namespace Local\Lib\DTO;
 
-use Local\Lib\DTO\Attributes\Cast;
-use Local\Lib\DTO\Attributes\CollectionType;
-use Local\Lib\DTO\BaseCollection;
+use Local\Lib\DTO\Utils\StringHelper;
+use Local\Lib\DTO\Attributes\Validation\ValidationRuleInterface;
 use Local\Lib\DTO\Validation\ValidationResult;
 use Local\Lib\DTO\Validation\ValidationError;
-use Local\Lib\DTO\Utils\StringHelper;
+use Local\Lib\DTO\Attributes\Mapping\MapFrom;
+use Local\Lib\DTO\Attributes\Mapping\MapTo;
+use ReflectionParameter;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
@@ -87,11 +88,55 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
      */
     public static function fromArray(array $data, bool $strict = false): static
     {
-        $dto = new static();
+        $reflection = new ReflectionClass(static::class);
+        $constructor = $reflection->getConstructor();
         $properties = self::getReflectedProperties(static::class);
 
+        $constructorArgs = [];
+        $handledProperties = [];
+
+        // Этап 1: Гидратация через конструктор
+        if ($constructor) {
+            foreach ($constructor->getParameters() as $param) {
+                $paramName = $param->getName();
+                $prop = $properties[$paramName] ?? null;
+
+                // Передаем сам объект рефлексии параметра для чтения атрибута MapFrom
+                $key = self::findKeyInArray($data, $param);
+
+                if ($key !== null) {
+                    $value = $data[$key];
+
+                    if ($value === null) {
+                        $type = $param->getType();
+                        if ($type === null || $type->allowsNull()) {
+                            $constructorArgs[$paramName] = null;
+                        }
+                    } else {
+                        if ($prop) {
+                            $processedValue = self::processValue($prop, $value, $strict);
+                            $constructorArgs[$paramName] = $processedValue;
+                        } else {
+                            $constructorArgs[$paramName] = $value;
+                        }
+                    }
+                    $handledProperties[$paramName] = true;
+                }
+            }
+
+            $dto = $reflection->newInstanceArgs($constructorArgs);
+        } else {
+            $dto = new static();
+        }
+
+        // Этап 2: Гидратация публичных свойств
         foreach ($properties as $propName => $prop) {
-            $key = self::findKeyInArray($data, $propName);
+            if (isset($handledProperties[$propName])) {
+                continue;
+            }
+
+            // Передаем объект рефлексии свойства
+            $key = self::findKeyInArray($data, $prop);
 
             if ($key === null) {
                 continue;
@@ -163,11 +208,18 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
 
             $value = $prop->getValue($this);
 
-            $key = match ($format) {
-                self::FORMAT_SNAKE => StringHelper::camel2snake($propName),
-                self::FORMAT_UPPER_SNAKE => strtoupper(StringHelper::camel2snake($propName)),
-                default => $propName
-            };
+            // Проверяем наличие атрибута MapTo (наивысший приоритет)
+            $mapToAttrs = $prop->getAttributes(MapTo::class);
+            if (!empty($mapToAttrs)) {
+                $key = $mapToAttrs[0]->newInstance()->key;
+            } else {
+                // Фоллбэк на системный формат
+                $key = match ($format) {
+                    self::FORMAT_SNAKE => StringHelper::camel2snake($propName),
+                    self::FORMAT_UPPER_SNAKE => strtoupper(StringHelper::camel2snake($propName)),
+                    default => $propName
+                };
+            }
 
             if ($value instanceof self) {
                 $result[$key] = $value->toArray($format);
@@ -185,7 +237,7 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
 
     /**
      * Валидация данных.
-     * Проверяет обязательность полей и рекурсивно валидирует вложенные DTO.
+     * Проверяет обязательность полей, декларативные атрибуты валидации и рекурсивно валидирует вложенные DTO.
      */
     public function validate(): ValidationResult
     {
@@ -201,6 +253,19 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
             }
 
             $value = $prop->getValue($this);
+
+            // Обработка кастомных атрибутов валидации
+            $attributes = $prop->getAttributes(ValidationRuleInterface::class, \ReflectionAttribute::IS_INSTANCEOF);
+            foreach ($attributes as $attribute) {
+                /** @var ValidationRuleInterface $rule */
+                $rule = $attribute->newInstance();
+                $error = $rule->validate($value);
+
+                if ($error !== null) {
+                    // Формируем код ошибки с привязкой к имени свойства, сохраняя текущий стиль проекта
+                    $result->addError(new ValidationError($error->getMessage(), "{$propName}." . $error->getCode()));
+                }
+            }
 
             if ($value instanceof self) {
                 $subResult = $value->validate();
@@ -274,14 +339,27 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
     }
 
     /**
-     * Поиск ключа в массиве данных с кэшированием вариантов написания.
+     * Поиск ключа в массиве данных с учетом атрибута MapFrom и кэшированием вариантов написания.
      */
-    private static function findKeyInArray(array $data, string $propName): ?string
+    private static function findKeyInArray(array $data, ReflectionProperty|ReflectionParameter $reflector): ?string
     {
+        // 1. Приоритет отдаем явному маппингу
+        $attributes = $reflector->getAttributes(MapFrom::class);
+        if (!empty($attributes)) {
+            $mappedKey = $attributes[0]->newInstance()->key;
+            if (array_key_exists($mappedKey, $data)) {
+                return $mappedKey;
+            }
+        }
+
+        $propName = $reflector->getName();
+
+        // 2. Ищем точное совпадение
         if (array_key_exists($propName, $data)) {
             return $propName;
         }
 
+        // 3. Фолбэк на snake_case/UPPER_SNAKE с кэшированием
         static $snakeCache = [];
 
         if (!isset($snakeCache[$propName])) {
