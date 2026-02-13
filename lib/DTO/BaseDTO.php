@@ -8,6 +8,13 @@ use Local\Lib\DTO\Validation\ValidationResult;
 use Local\Lib\DTO\Validation\ValidationError;
 use Local\Lib\DTO\Attributes\Mapping\MapFrom;
 use Local\Lib\DTO\Attributes\Mapping\MapTo;
+use Local\Lib\DTO\Attributes\Lifecycle\PostHydrate;
+use Local\Lib\DTO\Attributes\Lifecycle\PreExport;
+use Local\Lib\DTO\Attributes\Mapping\Computed;
+use Local\Lib\DTO\Attributes\Behavior\Strict;
+use Local\Lib\DTO\Exceptions\UnmappedPropertiesException;
+use Local\Lib\DTO\Attributes\Behavior\Hidden;
+use Local\Lib\DTO\Attributes\Behavior\Masked;
 use ReflectionParameter;
 use ReflectionClass;
 use ReflectionNamedType;
@@ -95,16 +102,19 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
         $constructorArgs = [];
         $handledProperties = [];
 
+        // Массив для отслеживания ключей, которые мы забрали из $data
+        $usedArrayKeys = [];
+
         // Этап 1: Гидратация через конструктор
         if ($constructor) {
             foreach ($constructor->getParameters() as $param) {
                 $paramName = $param->getName();
                 $prop = $properties[$paramName] ?? null;
 
-                // Передаем сам объект рефлексии параметра для чтения атрибута MapFrom
                 $key = self::findKeyInArray($data, $param);
 
                 if ($key !== null) {
+                    $usedArrayKeys[] = $key; // Запоминаем использованный ключ
                     $value = $data[$key];
 
                     if ($value === null) {
@@ -135,13 +145,13 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
                 continue;
             }
 
-            // Передаем объект рефлексии свойства
             $key = self::findKeyInArray($data, $prop);
 
             if ($key === null) {
                 continue;
             }
 
+            $usedArrayKeys[] = $key; // Запоминаем использованный ключ
             $value = $data[$key];
 
             if ($value === null) {
@@ -155,6 +165,26 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
 
             if (self::isValueCompatible($prop, $processedValue)) {
                 $prop->setValue($dto, $processedValue);
+            }
+        }
+
+        // Этап 3: Проверка Strict Mode
+        if (!empty($reflection->getAttributes(Strict::class))) {
+            // Находим ключи, которые были в $data, но не попали в $usedArrayKeys
+            $unmappedKeys = array_diff(array_keys($data), $usedArrayKeys);
+
+            if (!empty($unmappedKeys)) {
+                throw new UnmappedPropertiesException($unmappedKeys);
+            }
+        }
+
+        // Этап 4: Вызов хуков PostHydrate
+        foreach ($reflection->getMethods() as $method) {
+            if (!empty($method->getAttributes(PostHydrate::class))) {
+                if (!$method->isPublic()) {
+                    $method->setAccessible(true);
+                }
+                $method->invoke($dto);
             }
         }
 
@@ -198,22 +228,44 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
      */
     public function toArray(string $format = self::FORMAT_CAMEL): array
     {
+        $reflection = new ReflectionClass(static::class);
+
+        // Этап 1: Вызов хуков PreExport
+        foreach ($reflection->getMethods() as $method) {
+            if (!empty($method->getAttributes(PreExport::class))) {
+                if (!$method->isPublic()) {
+                    $method->setAccessible(true);
+                }
+                $method->invoke($this);
+            }
+        }
+
         $result = [];
         $properties = self::getReflectedProperties(static::class);
 
+        // Этап 2: Формирование массива из свойств
         foreach ($properties as $propName => $prop) {
             if (!$prop->isInitialized($this)) {
                 continue;
             }
 
+            // Идея 8: Безопасность - Полное скрытие свойства
+            if (!empty($prop->getAttributes(Hidden::class))) {
+                continue;
+            }
+
             $value = $prop->getValue($this);
 
-            // Проверяем наличие атрибута MapTo (наивысший приоритет)
+            // Идея 8: Безопасность - Маскирование значения
+            $maskedAttrs = $prop->getAttributes(Masked::class);
+            if (!empty($maskedAttrs)) {
+                $value = $maskedAttrs[0]->newInstance()->mask;
+            }
+
             $mapToAttrs = $prop->getAttributes(MapTo::class);
             if (!empty($mapToAttrs)) {
                 $key = $mapToAttrs[0]->newInstance()->key;
             } else {
-                // Фоллбэк на системный формат
                 $key = match ($format) {
                     self::FORMAT_SNAKE => StringHelper::camel2snake($propName),
                     self::FORMAT_UPPER_SNAKE => strtoupper(StringHelper::camel2snake($propName)),
@@ -229,6 +281,45 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
                 }, $value);
             } else {
                 $result[$key] = $value;
+            }
+        }
+
+        // Этап 3: Вычисляемые свойства (Computed Properties)
+        foreach ($reflection->getMethods() as $method) {
+            if (!empty($method->getAttributes(Computed::class))) {
+                if (!$method->isPublic()) {
+                    $method->setAccessible(true);
+                }
+
+                $value = $method->invoke($this);
+                $methodName = $method->getName();
+
+                if (str_starts_with($methodName, 'get') && strlen($methodName) > 3) {
+                    $baseName = lcfirst(substr($methodName, 3));
+                } else {
+                    $baseName = $methodName;
+                }
+
+                $mapToAttrs = $method->getAttributes(MapTo::class);
+                if (!empty($mapToAttrs)) {
+                    $key = $mapToAttrs[0]->newInstance()->key;
+                } else {
+                    $key = match ($format) {
+                        self::FORMAT_SNAKE => StringHelper::camel2snake($baseName),
+                        self::FORMAT_UPPER_SNAKE => strtoupper(StringHelper::camel2snake($baseName)),
+                        default => $baseName
+                    };
+                }
+
+                if ($value instanceof self) {
+                    $result[$key] = $value->toArray($format);
+                } elseif (is_array($value)) {
+                    $result[$key] = array_map(function ($item) use ($format) {
+                        return ($item instanceof self) ? $item->toArray($format) : $item;
+                    }, $value);
+                } else {
+                    $result[$key] = $value;
+                }
             }
         }
 

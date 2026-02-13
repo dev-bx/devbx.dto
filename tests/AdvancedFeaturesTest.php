@@ -14,6 +14,13 @@ use Local\Lib\DTO\Attributes\Mapping\Body;
 use Local\Lib\DTO\Attributes\Mapping\MapFrom;
 use Local\Lib\DTO\Attributes\Mapping\MapTo;
 use Local\Lib\DTO\Http\AbstractController;
+use Local\Lib\DTO\Attributes\Lifecycle\PostHydrate;
+use Local\Lib\DTO\Attributes\Lifecycle\PreExport;
+use Local\Lib\DTO\Attributes\Mapping\Computed;
+use Local\Lib\DTO\Attributes\Behavior\Strict;
+use Local\Lib\DTO\Exceptions\UnmappedPropertiesException;
+use Local\Lib\DTO\Attributes\Behavior\Hidden;
+use Local\Lib\DTO\Attributes\Behavior\Masked;
 
 // --- ТЕСТОВЫЕ ФИКСТУРЫ (Fixtures) ---
 
@@ -51,6 +58,85 @@ class Idea3RequestDTO extends BaseDTO
         #[Body('user_email')]
         public readonly string $email
     ) {}
+}
+
+// Фикстура для Идеи 5 (Lifecycle Hooks)
+class Idea5LifecycleDTO extends BaseDTO
+{
+    public string $email;
+    public string $status;
+    public ?string $exportTimestamp = null;
+
+    #[PostHydrate]
+    protected function normalizeData(): void
+    {
+        // Имитируем очистку данных после гидратации
+        $this->email = strtolower(trim($this->email));
+
+        if ($this->status === 'pending') {
+            $this->status = 'processed_by_hook';
+        }
+    }
+
+    #[PreExport]
+    protected function prepareForExport(): void
+    {
+        // Имитируем добавление метки времени перед отдачей в массив
+        $this->exportTimestamp = '2026-02-13 21:00:00';
+    }
+}
+
+// Фикстура для Идеи 6 (Вычисляемые свойства)
+class Idea6ComputedDTO extends BaseDTO
+{
+    public string $firstName = 'John';
+    public string $lastName = 'Doe';
+    public int $price = 100;
+
+    // Стандартное поведение (уберет 'get' и сконвертирует в camelCase/snake_case)
+    #[Computed]
+    public function getFullName(): string
+    {
+        return $this->firstName . ' ' . $this->lastName;
+    }
+
+    // Кастомный маппинг имени ключа
+    #[Computed]
+    #[MapTo('total_with_tax')]
+    protected function calculateTotal(): float
+    {
+        return $this->price * 1.2;
+    }
+
+    // Метод без 'get'
+    #[Computed]
+    public function isExpensive(): bool
+    {
+        return $this->price > 50;
+    }
+}
+
+// Фикстура для Идеи 7 (Strict Mode)
+#[Strict]
+class Idea7StrictDTO extends BaseDTO
+{
+    public int $id;
+    public string $name;
+}
+
+// Фикстура для Идеи 8 (Data Masking & Hidden)
+class Idea8SecurityDTO extends BaseDTO
+{
+    public string $username;
+
+    #[Masked]
+    public string $password;
+
+    #[Masked('*** REDACTED ***')]
+    public string $apiToken;
+
+    #[Hidden]
+    public string $internalSecret;
 }
 
 class TestController extends AbstractController
@@ -190,5 +276,118 @@ class AdvancedFeaturesTest extends TestCase
         // Убеждаемся, что старые имена свойств не экспортировались
         $this->assertArrayNotHasKey('count', $outputData);
         $this->assertArrayNotHasKey('requestId', $outputData);
+    }
+
+    /**
+     * Идея 5: Тестирование хуков жизненного цикла (PostHydrate и PreExport)
+     */
+    public function testLifecycleHooks()
+    {
+        $inputData = [
+            'email' => '   USer@ExAmple.COM   ',
+            'status' => 'pending'
+        ];
+
+        // 1. Тестируем #[PostHydrate] (срабатывает внутри fromArray)
+        $dto = Idea5LifecycleDTO::fromArray($inputData);
+
+        // Проверяем, что метод normalizeData() отработал и изменил свойства
+        $this->assertEquals('user@example.com', $dto->email, 'Email должен быть очищен и переведен в нижний регистр хуком');
+        $this->assertEquals('processed_by_hook', $dto->status, 'Статус должен быть изменен хуком');
+        $this->assertNull($dto->exportTimestamp, 'Поле exportTimestamp пока должно быть null');
+
+        // 2. Тестируем #[PreExport] (срабатывает внутри toArray)
+        $outputArray = $dto->toArray();
+
+        // Проверяем, что метод prepareForExport() отработал перед генерацией массива
+        $this->assertEquals('2026-02-13 21:00:00', $dto->exportTimestamp, 'Свойство должно заполниться внутри объекта');
+        $this->assertArrayHasKey('exportTimestamp', $outputArray, 'Ключ должен появиться в экспортируемом массиве (camelCase по умолчанию)');
+        $this->assertEquals('2026-02-13 21:00:00', $outputArray['exportTimestamp']);
+    }
+
+    /**
+     * Идея 6: Тестирование вычисляемых свойств (Computed Properties)
+     */
+    public function testComputedProperties()
+    {
+        $dto = new Idea6ComputedDTO();
+
+        // Тестируем экспорт в формате snake_case
+        $outputArray = $dto->toArray(BaseDTO::FORMAT_SNAKE);
+
+        // Проверяем обычные свойства
+        $this->assertEquals('John', $outputArray['first_name']);
+
+        // Проверяем Computed с префиксом get
+        $this->assertArrayHasKey('full_name', $outputArray, 'Должен быть сгенерирован ключ full_name');
+        $this->assertEquals('John Doe', $outputArray['full_name']);
+
+        // Проверяем Computed с MapTo
+        $this->assertArrayHasKey('total_with_tax', $outputArray);
+        $this->assertEquals(120.0, $outputArray['total_with_tax']);
+
+        // Проверяем Computed без префикса get
+        $this->assertArrayHasKey('is_expensive', $outputArray);
+        $this->assertTrue($outputArray['is_expensive']);
+    }
+
+    /**
+     * Идея 7: Тестирование Strict Mode (защита от несмаппленных данных)
+     */
+    public function testStrictModeThrowsExceptionOnUnmappedData()
+    {
+        // 1. Успешный кейс (нет лишних данных)
+        $validData = [
+            'id' => 1,
+            'name' => 'Valid User'
+        ];
+        $dto = Idea7StrictDTO::fromArray($validData);
+        $this->assertEquals(1, $dto->id);
+        $this->assertEquals('Valid User', $dto->name);
+
+        // 2. Ожидаем исключение при наличии лишних данных
+        $invalidData = [
+            'id' => 2,
+            'name' => 'Invalid User',
+            'is_admin' => true,    // Лишнее поле 1
+            'token' => 'abc-123'   // Лишнее поле 2
+        ];
+
+        $this->expectException(UnmappedPropertiesException::class);
+        $this->expectExceptionMessage('Strict Mode: Unmapped properties found in input data - is_admin, token');
+
+        // Должно выбросить UnmappedPropertiesException
+        Idea7StrictDTO::fromArray($invalidData);
+    }
+
+    /**
+     * Идея 8: Тестирование безопасности сериализации (Hidden и Masked)
+     */
+    public function testSecurityAttributesDuringExport()
+    {
+        $dto = new Idea8SecurityDTO();
+        $dto->username = 'admin';
+        $dto->password = 'super_secret_password_123';
+        $dto->apiToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
+        $dto->internalSecret = 'db_password_root';
+
+        // Экспортируем в массив
+        $outputArray = $dto->toArray();
+
+        // 1. Обычное свойство экспортируется как есть
+        $this->assertArrayHasKey('username', $outputArray);
+        $this->assertEquals('admin', $outputArray['username']);
+
+        // 2. Свойство с #[Masked] заменяется на маску по умолчанию
+        $this->assertArrayHasKey('password', $outputArray);
+        $this->assertEquals('********', $outputArray['password']);
+        $this->assertNotEquals('super_secret_password_123', $outputArray['password']);
+
+        // 3. Свойство с #[Masked('...')] заменяется на кастомную маску
+        $this->assertArrayHasKey('apiToken', $outputArray);
+        $this->assertEquals('*** REDACTED ***', $outputArray['apiToken']);
+
+        // 4. Свойство с #[Hidden] полностью отсутствует в массиве
+        $this->assertArrayNotHasKey('internalSecret', $outputArray);
     }
 }

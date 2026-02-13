@@ -6,4 +6,11 @@
          displayDetailsOnTestsThatTriggerWarnings="true"
          displayDetailsOnPhpunitDeprecations="true"
          >
+    
+    <testsuites>
+        <testsuite name="DTO Library Test Suite">
+            <directory suffix="Test.php">.</directory>
+        </testsuite>
+    </testsuites>
+
 </phpunit>

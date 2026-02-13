@@ -3,27 +3,25 @@
 namespace Tests\Local\Lib\DTO;
 
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Local\Lib\DTO\Utils\StringHelper;
 
 class StringHelperTest extends TestCase
 {
-    /**
-     * @dataProvider camelToSnakeProvider
-     */
+    #[DataProvider('camelToSnakeProvider')]
     public function testCamelToSnake(string $input, string $expected): void
     {
         $this->assertSame($expected, StringHelper::camel2snake($input));
     }
 
-    /**
-     * @dataProvider snakeToCamelProvider
-     */
+    #[DataProvider('snakeToCamelProvider')]
     public function testSnakeToCamel(string $input, string $expected): void
     {
         $this->assertSame($expected, StringHelper::snake2camel($input));
     }
 
-    public function camelToSnakeProvider(): array
+    // В PHPUnit 10+ провайдеры данных обязаны быть static
+    public static function camelToSnakeProvider(): array
     {
         return [
             ['userId', 'user_id'],
@@ -33,7 +31,7 @@ class StringHelperTest extends TestCase
         ];
     }
 
-    public function snakeToCamelProvider(): array
+    public static function snakeToCamelProvider(): array
     {
         return [
             ['user_id', 'userId'],
