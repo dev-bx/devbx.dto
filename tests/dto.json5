@@ -1,0 +1,43 @@
+{
+  "$schema": "https://ваша-компания.ru/schema/dto-schema.json",
+  "class": "UserDTO",
+  "namespace": "Local\\Lib\\DTO\\Models",
+  //"extends": "Local\\Lib\\DTO\\BaseDTO",
+  "phpDoc": "/**\n * DTO пользователя системы.\n * Содержит основные регистрационные данные.\n */",
+  "attributes": [],
+  "properties": {
+    "id": {
+      "types": ["int"],
+      "isNullable": false,
+      "default": null,
+      "phpDoc": "/**\n * @var int Внутренний идентификатор\n */",
+      "attributes": []
+    },
+    "status": {
+      "types": ["\\Local\\Lib\\DTO\\Enums\\UserStatus"],
+      "isNullable": true,
+      "default": "\\Local\\Lib\\DTO\\Enums\\UserStatus::Active",
+      "phpDoc": null,
+      "attributes": []
+    },
+    "historyAddresses": {
+      "types": ["AddressCollection"], //\\Local\Lib\DTO\Models\AddressCollection
+      "isNullable": false,
+      "default": "new AddressCollection()", //new \Local\Lib\DTO\Models\AddressCollection()
+      "phpDoc": "/**\n * @var AddressCollection История адресов проживания\n */",
+      "attributes": []
+    },
+    "rawTags": {
+      "types": ["array"],
+      "isNullable": false,
+      "default": "[]",
+      "phpDoc": null,
+      "attributes": [
+        {
+          "name": "Cast", // Local\Lib\DTO\Attributes\Cast
+          "arguments": ["TagDTO::class"] //Local\Lib\DTO\Models\TagDTO::class
+        }
+      ]
+    }
+  }
+}
