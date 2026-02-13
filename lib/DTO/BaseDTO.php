@@ -5,9 +5,9 @@ namespace Local\Lib\DTO;
 use Local\Lib\DTO\Attributes\Cast;
 use Local\Lib\DTO\Attributes\CollectionType;
 use Local\Lib\DTO\BaseCollection;
-use Bitrix\Main\Error;
-use Bitrix\Main\Result;
-use Bitrix\Main\Text\StringHelper;
+use Local\Lib\DTO\Validation\ValidationResult;
+use Local\Lib\DTO\Validation\ValidationError;
+use Local\Lib\DTO\Utils\StringHelper;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
@@ -187,15 +187,15 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
      * Валидация данных.
      * Проверяет обязательность полей и рекурсивно валидирует вложенные DTO.
      */
-    public function validate(): Result
+    public function validate(): ValidationResult
     {
-        $result = new Result();
+        $result = new ValidationResult();
         $properties = self::getReflectedProperties(static::class);
 
         foreach ($properties as $propName => $prop) {
             if (!$prop->isInitialized($this)) {
                 if (!$prop->getType()?->allowsNull()) {
-                    $result->addError(new Error("Field '{$propName}' is required.", "REQUIRED_FIELD_{$propName}"));
+                    $result->addError(new ValidationError("Field '{$propName}' is required.", "REQUIRED_FIELD_{$propName}"));
                 }
                 continue;
             }
@@ -206,16 +206,16 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
                 $subResult = $value->validate();
                 if (!$subResult->isSuccess()) {
                     foreach ($subResult->getErrors() as $error) {
-                        $result->addError(new Error($error->getMessage(), "{$propName}." . $error->getCode()));
+                        $result->addError(new ValidationError($error->getMessage(), "{$propName}." . $error->getCode()));
                     }
                 }
-            } elseif (is_array($value)) {
+            } elseif (is_array($value) || $value instanceof BaseCollection) {
                 foreach ($value as $index => $item) {
                     if ($item instanceof self) {
                         $subResult = $item->validate();
                         if (!$subResult->isSuccess()) {
                             foreach ($subResult->getErrors() as $error) {
-                                $result->addError(new Error($error->getMessage(), "{$propName}[{$index}]." . $error->getCode()));
+                                $result->addError(new ValidationError($error->getMessage(), "{$propName}[{$index}]." . $error->getCode()));
                             }
                         }
                     }
@@ -230,7 +230,7 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
 
     /**
      * Обработка значения перед присвоением.
-     * Поддержка вложенных DTO, Cast, Enum, DateTime и скалярных типов.
+     * Использует Pipeline из Casters для разделения ответственности.
      */
     private static function processValue(ReflectionProperty $prop, mixed $value, bool $strict): mixed
     {
@@ -240,102 +240,37 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
             return $value;
         }
 
-        $typeName = $type->getName();
+        $casters = self::getCasters();
 
-        // 1. Вложенный DTO
-        if (is_subclass_of($typeName, self::class) && is_array($value)) {
-            return $typeName::fromArray($value, $strict);
-        }
-
-        // 2. Массив DTO (классический array)
-        if ($typeName === 'array' && is_array($value)) {
-            $attributes = $prop->getAttributes(Cast::class);
-            if (!empty($attributes)) {
-                $targetClass = $attributes[0]->newInstance()->className;
-                if (is_subclass_of($targetClass, self::class)) {
-                    return array_map(
-                        fn($item) => is_array($item) ? $targetClass::fromArray($item, $strict) : $item,
-                        $value
-                    );
-                }
+        foreach ($casters as $caster) {
+            if ($caster->supports($type, $value)) {
+                return $caster->cast($type, $prop, $value, $strict);
             }
-            return $value;
-        }
-
-        // --- НОВЫЙ БЛОК: Поддержка кастомных коллекций (BaseCollection) ---
-        // Проверяем, является ли тип наследником BaseCollection
-        if (is_subclass_of($typeName, BaseCollection::class) && is_array($value)) {
-            $items = $value;
-            $targetClass = null;
-
-            // Шаг А: Сначала проверяем атрибут Cast на самом свойстве (высший приоритет, override)
-            $attributes = $prop->getAttributes(Cast::class);
-            if (!empty($attributes)) {
-                $targetClass = $attributes[0]->newInstance()->className;
-            } else {
-                // Шаг Б: Если Cast нет, проверяем атрибут CollectionType на классе самой коллекции
-                $collectionReflection = new ReflectionClass($typeName);
-                $collectionAttributes = $collectionReflection->getAttributes(CollectionType::class);
-                if (!empty($collectionAttributes)) {
-                    $targetClass = $collectionAttributes[0]->newInstance()->className;
-                }
-            }
-
-            // Если целевой класс определен, гидрируем массив
-            if ($targetClass && is_subclass_of($targetClass, self::class)) {
-                $items = array_map(
-                    fn($item) => is_array($item) ? $targetClass::fromArray($item, $strict) : $item,
-                    $value
-                );
-            }
-
-            // Создаем экземпляр коллекции, передавая ей уже готовые объекты (или сырые данные)
-            return new $typeName($items);
-        }
-        // ------------------------------------------------------------------
-
-        // 3. BackedEnum (PHP 8.1+)
-        if (is_subclass_of($typeName, \BackedEnum::class) && (is_string($value) || is_int($value))) {
-            return $typeName::tryFrom($value) ?? $value;
-        }
-
-        // 4. DateTime и Bitrix Date
-        if (is_string($value) && (
-                is_a($typeName, \DateTimeInterface::class, true) ||
-                is_a($typeName, \Bitrix\Main\Type\Date::class, true)
-            )) {
-            try {
-                return new $typeName($value);
-            } catch (\Throwable $e) {
-                try {
-                    $intermediate = new \DateTime($value);
-                    if (is_a($typeName, \Bitrix\Main\Type\Date::class, true)) {
-                        return $typeName::createFromPhp($intermediate);
-                    }
-                    return new $typeName($intermediate);
-                } catch (\Throwable $ex) {
-                    return $value;
-                }
-            }
-        }
-
-        // 5. Скалярные типы (Casting)
-        if (!$strict && is_scalar($value)) {
-            if ($typeName === 'bool' && is_string($value)) {
-                if ($value === 'Y') return true;
-                if ($value === 'N') return false;
-            }
-
-            return match ($typeName) {
-                'int' => (int)$value,
-                'float' => (float)$value,
-                'string' => (string)$value,
-                'bool' => (bool)$value,
-                default => $value
-            };
         }
 
         return $value;
+    }
+
+    /**
+     * Возвращает зарегистрированные обработчики типов (Pipeline).
+     * @return \Local\Lib\DTO\Casters\CasterInterface[]
+     */
+    private static function getCasters(): array
+    {
+        static $casters = null;
+
+        if ($casters === null) {
+            $casters = [
+                new \Local\Lib\DTO\Casters\DtoCaster(),
+                new \Local\Lib\DTO\Casters\CollectionCaster(),
+                new \Local\Lib\DTO\Casters\ArrayCaster(),
+                new \Local\Lib\DTO\Casters\EnumCaster(),
+                new \Local\Lib\DTO\Casters\DateTimeCaster(),
+                new \Local\Lib\DTO\Casters\ScalarCaster(),
+            ];
+        }
+
+        return $casters;
     }
 
     /**

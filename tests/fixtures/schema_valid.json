@@ -1,0 +1,27 @@
+{
+  "$schema": "https://dev-bx.ru/schema/agnostic-dto-schema.json",
+  "name": "GeneratedUserDTO",
+  "module": "Models",
+  "extends": "BaseDTO",
+  "description": "Тестовый DTO сгенерированный из схемы",
+  "imports": [],
+  "properties": {
+    "id": {
+      "type": ["integer"],
+      "isNullable": false,
+      "default": null,
+      "description": "Идентификатор"
+    },
+    "isActive": {
+      "type": ["boolean"],
+      "isNullable": true,
+      "default": true
+    },
+    "tags": {
+      "type": ["array"],
+      "items": "string",
+      "isNullable": false,
+      "default": []
+    }
+  }
+}

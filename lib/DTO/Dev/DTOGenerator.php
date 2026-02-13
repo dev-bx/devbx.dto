@@ -2,11 +2,19 @@
 
 namespace Local\Lib\DTO\Dev;
 
-use Bitrix\Main\Text\StringHelper;
+use Local\Lib\DTO\Utils\StringHelper;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
 use ReflectionUnionType;
+
+/**
+ * Утилита для быстрого прототипирования DTO на основе сырых массивов данных.
+ * ВНИМАНИЕ: Класс использует механизмы "угадывания" (Data Inference) типов на основе значений.
+ * Предназначен исключительно для генерации черновиков (scaffolding) кода, которые
+ * разработчик должен проверить и откорректировать вручную.
+ * * Для строгой и точной генерации используйте подсистему DTOSchema.
+ */
 
 class DTOGenerator
 {
@@ -184,12 +192,9 @@ class DTOGenerator
         if (!str_contains($key, '_') && !ctype_upper($key)) {
             return lcfirst($key);
         }
-        if (class_exists(StringHelper::class)) {
-            $camel = StringHelper::snake2camel($key);
-        } else {
-            $camel = str_replace(' ', '', ucwords(str_replace('_', ' ', strtolower($key))));
-        }
-        return lcfirst($camel);
+
+        // Используем нашу собственную утилиту без лишних проверок
+        return StringHelper::snake2camel($key);
     }
 
     private static function detectType(mixed $value): array

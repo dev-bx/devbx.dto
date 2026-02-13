@@ -58,7 +58,7 @@ class BaseDTOTest extends TestCase
         $data = [
             'ID' => '100',           // String -> Int conversion
             'NAME' => 'Ruslan',
-            'IS_ACTIVE' => 'Y',      // Bitrix Bool conversion
+            'IS_ACTIVE' => 'Y',      // String 'Y' -> Bool conversion
             'UNKNOWN_FIELD' => 123   // Should be ignored
         ];
 
@@ -81,7 +81,7 @@ class BaseDTOTest extends TestCase
         $data = [
             'ID' => '100', // Строка, а ожидается int
             'NAME' => 'Ruslan',
-            'IS_ACTIVE' => 'Y' // Битрикс формат, а ожидается bool
+            'IS_ACTIVE' => 'Y' // Строка 'Y', а ожидается bool
         ];
 
         // Включаем Strict Mode = true
@@ -799,11 +799,11 @@ class BaseDTOTest extends TestCase
         $this->assertInstanceOf(\Bitrix\Main\Type\DateTime::class, $dto->bitrixDateTime);
         $this->assertEquals($dateTimeStr, $dto->bitrixDateTime->format('Y-m-d H:i:s'));
     }
+
     /**
-     * Тест специфичной для Bitrix конвертации булевых значений ('Y'/'N').
-     * (Bitrix Integration: Boolean Logic)
+     * Тест специфичной конвертации строковых булевых значений ('Y'/'N').
      */
-    public function testBitrixBooleanConversion(): void
+    public function testYAndNBooleanConversion(): void
     {
         $dtoClass = new class extends BaseDTO {
             public bool $flagYes;
@@ -812,8 +812,8 @@ class BaseDTOTest extends TestCase
         $className = get_class($dtoClass);
 
         $dto = $className::fromArray([
-            'FLAG_YES' => 'Y', // Bitrix true
-            'FLAG_NO' => 'N'   // Bitrix false
+            'FLAG_YES' => 'Y', // Строковое true
+            'FLAG_NO' => 'N'   // Строковое false
         ]);
 
         $this->assertTrue($dto->flagYes, "'Y' должно конвертироваться в true");
@@ -821,38 +821,36 @@ class BaseDTOTest extends TestCase
     }
 
     /**
-     * Тест структуры ошибок Bitrix.
-     * Убеждаемся, что возвращается именно Bitrix\Main\Result, а ошибки — это Bitrix\Main\Error.
-     * (Bitrix Integration: Result & Error)
+     * Тест структуры ошибок валидации.
+     * Убеждаемся, что возвращается независимый ValidationResult, а ошибки — это ValidationError.
      */
-    public function testValidationReturnsBitrixObjects(): void
+    public function testValidationReturnsCustomObjects(): void
     {
         $dto = new TestUserDTO();
         // Не заполняем обязательные поля, чтобы вызвать ошибку
 
         $result = $dto->validate();
 
-        // Проверяем типы объектов
-        $this->assertInstanceOf(\Bitrix\Main\Result::class, $result);
+        // Проверяем типы новых объектов валидации
+        $this->assertInstanceOf(\Local\Lib\DTO\Validation\ValidationResult::class, $result);
         $this->assertFalse($result->isSuccess());
 
         $errors = $result->getErrors();
         $this->assertNotEmpty($errors);
 
         $firstError = reset($errors);
-        $this->assertInstanceOf(\Bitrix\Main\Error::class, $firstError);
+        $this->assertInstanceOf(\Local\Lib\DTO\Validation\ValidationError::class, $firstError);
 
         // Проверяем, что код ошибки пробрасывается корректно
-        // Для TestUserDTO ожидаем 'REQUIRED_FIELD_id' (так как id обязателен и первый по списку)
-        $this->assertStringContainsString('REQUIRED_FIELD', $firstError->getCode());
+        // Для TestUserDTO ожидаем 'REQUIRED_FIELD_id'
+        $this->assertStringContainsString('REQUIRED_FIELD', (string)$firstError->getCode());
     }
 
     /**
-     * Тест использования Bitrix StringHelper при экспорте в UPPER_SNAKE_CASE.
+     * Тест использования кастомного StringHelper при экспорте в UPPER_SNAKE_CASE.
      * Проверяет корректность генерации ключей для сложных имен свойств.
-     * (Bitrix Integration: StringHelper)
      */
-    public function testToArrayUsingBitrixHelper(): void
+    public function testToArrayUsingCustomStringHelper(): void
     {
         $dto = new TestUserDTO();
         // historyAddresses -> HISTORY_ADDRESSES (тест сложного составного имени)
