@@ -5,9 +5,15 @@ namespace Local\Lib\DTO\Schema;
 use Local\Lib\DTO\BaseCollection;
 use Local\Lib\DTO\Attributes\Cast;
 use Local\Lib\DTO\Attributes\CollectionType;
+use Local\Lib\DTO\Attributes\Behavior\Hidden;
+use Local\Lib\DTO\Attributes\Behavior\Masked;
+use Local\Lib\DTO\Attributes\Mapping\Computed;
+use Local\Lib\DTO\Attributes\Mapping\MapTo;
+use Local\Lib\DTO\Attributes\Validation\Min;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
+use ReflectionMethod;
 use ReflectionUnionType;
 
 class SchemaExporter implements SchemaExporterInterface
@@ -31,17 +37,40 @@ class SchemaExporter implements SchemaExporterInterface
         $imports = [];
         $properties = [];
 
+        // 1. Сбор обычных свойств
         foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $prop) {
-            // Игнорируем статические свойства
-            if ($prop->isStatic()) {
+            // Игнорируем статические свойства и свойства с атрибутом Hidden
+            if ($prop->isStatic() || !empty($prop->getAttributes(Hidden::class))) {
                 continue;
             }
 
-            $propName = $prop->getName();
+            // Учитываем кастомный маппинг имени ключа
+            $mapToAttrs = $prop->getAttributes(MapTo::class);
+            $propName = !empty($mapToAttrs) ? $mapToAttrs[0]->newInstance()->key : $prop->getName();
+
             $properties[$propName] = $this->exportProperty($prop, $imports);
         }
 
-        // Дедупликация импортов (и удаление импорта самого себя)
+        // 2. Сбор вычисляемых свойств (Computed Properties)
+        foreach ($reflection->getMethods() as $method) {
+            if (!empty($method->getAttributes(Computed::class))) {
+                $methodName = $method->getName();
+
+                // Отрезаем get
+                if (str_starts_with($methodName, 'get') && strlen($methodName) > 3) {
+                    $baseName = lcfirst(substr($methodName, 3));
+                } else {
+                    $baseName = $methodName;
+                }
+
+                $mapToAttrs = $method->getAttributes(MapTo::class);
+                $propName = !empty($mapToAttrs) ? $mapToAttrs[0]->newInstance()->key : $baseName;
+
+                $properties[$propName] = $this->exportMethodAsProperty($method, $imports);
+            }
+        }
+
+        // Дедупликация импортов
         $uniqueImports = [];
         foreach ($imports as $import) {
             $key = $import['module'] . '\\' . $import['name'];
@@ -73,14 +102,12 @@ class SchemaExporter implements SchemaExporterInterface
         $default = null;
         if ($prop->hasDefaultValue()) {
             $val = $prop->getDefaultValue();
-            // Извлекаем имя константы из Enum, чтобы избежать сериализации объектов
             if ($val instanceof \BackedEnum || $val instanceof \UnitEnum) {
                 $default = $val->name;
             } else {
                 $default = $val;
             }
         } elseif (in_array('collection', $typeSchema['type'], true) || in_array('array', $typeSchema['type'], true)) {
-            // Если дефолт не задан, но это массив или коллекция, в схеме по умолчанию это []
             $default = [];
         }
 
@@ -90,6 +117,24 @@ class SchemaExporter implements SchemaExporterInterface
             'default' => $default,
             'description' => $this->parseDocComment($prop->getDocComment()),
         ];
+
+        // Маскирование данных
+        if (!empty($prop->getAttributes(Masked::class))) {
+            $schema['isMasked'] = true;
+        }
+
+        // Интеграция правил валидации
+        $minAttrs = $prop->getAttributes(Min::class);
+        if (!empty($minAttrs)) {
+            $minValue = $minAttrs[0]->newInstance()->minValue;
+            if (in_array('integer', $typeSchema['type'], true) || in_array('number', $typeSchema['type'], true)) {
+                $schema['minimum'] = $minValue;
+            } elseif (in_array('string', $typeSchema['type'], true)) {
+                $schema['minLength'] = $minValue;
+            } elseif (in_array('array', $typeSchema['type'], true) || in_array('collection', $typeSchema['type'], true)) {
+                $schema['minItems'] = $minValue;
+            }
+        }
 
         if ($typeSchema['isEnum']) {
             $schema['isEnum'] = true;
@@ -103,11 +148,36 @@ class SchemaExporter implements SchemaExporterInterface
     }
 
     /**
-     * Определяет языково-независимые типы и собирает импорты.
+     * Преобразует Computed-метод в readOnly свойство схемы.
      */
-    private function extractTypeSchema(ReflectionProperty $prop, array &$imports): array
+    private function exportMethodAsProperty(ReflectionMethod $method, array &$imports): array
     {
-        $reflectionType = $prop->getType();
+        $typeSchema = $this->extractTypeSchema($method, $imports);
+
+        $schema = [
+            'type' => $typeSchema['type'],
+            'isNullable' => $typeSchema['isNullable'],
+            'readOnly' => true, // Обязательный флаг для вычисляемых свойств
+            'description' => $this->parseDocComment($method->getDocComment()),
+        ];
+
+        if ($typeSchema['isEnum']) {
+            $schema['isEnum'] = true;
+        }
+        if ($typeSchema['items']) {
+            $schema['items'] = $typeSchema['items'];
+        }
+
+        return $schema;
+    }
+
+    /**
+     * Определяет языково-независимые типы и собирает импорты для свойств и методов.
+     */
+    private function extractTypeSchema(ReflectionProperty|ReflectionMethod $reflector, array &$imports): array
+    {
+        $reflectionType = $reflector instanceof ReflectionProperty ? $reflector->getType() : $reflector->getReturnType();
+
         $types = [];
         $isNullable = false;
         $isEnum = false;
@@ -117,20 +187,19 @@ class SchemaExporter implements SchemaExporterInterface
             return ['type' => ['any'], 'isNullable' => true, 'isEnum' => false, 'items' => null];
         }
 
-        $processNamedType = function (ReflectionNamedType $t) use ($prop, &$imports, &$isEnum, &$items) {
+        $processNamedType = function (ReflectionNamedType $t) use ($reflector, &$imports, &$isEnum, &$items) {
             $name = $t->getName();
 
-            // 1. Примитивные типы PHP -> Language Agnostic
             if ($t->isBuiltin()) {
                 $mapped = match ($name) {
                     'int' => 'integer',
                     'float' => 'number',
                     'bool' => 'boolean',
-                    default => $name // string, array, mixed
+                    default => $name
                 };
 
                 if ($mapped === 'array') {
-                    $itemsClass = $this->resolveItemsType($prop, null);
+                    $itemsClass = $this->resolveItemsType($reflector, null);
                     if ($itemsClass) {
                         $info = $this->parseNamespaceAndName($itemsClass);
                         $imports[] = $info;
@@ -141,7 +210,6 @@ class SchemaExporter implements SchemaExporterInterface
                 return $mapped;
             }
 
-            // 2. Enums
             if (is_subclass_of($name, \BackedEnum::class) || is_subclass_of($name, \UnitEnum::class)) {
                 $isEnum = true;
                 $info = $this->parseNamespaceAndName($name);
@@ -149,9 +217,8 @@ class SchemaExporter implements SchemaExporterInterface
                 return $info['name'];
             }
 
-            // 3. Коллекции
             if (is_subclass_of($name, BaseCollection::class)) {
-                $itemsClass = $this->resolveItemsType($prop, $name);
+                $itemsClass = $this->resolveItemsType($reflector, $name);
                 if ($itemsClass) {
                     $info = $this->parseNamespaceAndName($itemsClass);
                     $imports[] = $info;
@@ -159,11 +226,10 @@ class SchemaExporter implements SchemaExporterInterface
                 }
 
                 $info = $this->parseNamespaceAndName($name);
-                $imports[] = $info; // Импортируем сам класс коллекции
+                $imports[] = $info;
                 return 'collection';
             }
 
-            // 4. Обычные DTO классы
             $info = $this->parseNamespaceAndName($name);
             $imports[] = $info;
             return $info['name'];
@@ -192,15 +258,14 @@ class SchemaExporter implements SchemaExporterInterface
     /**
      * Пытается найти тип дочерних элементов для массивов и коллекций.
      */
-    private function resolveItemsType(ReflectionProperty $prop, ?string $collectionClass): ?string
+    private function resolveItemsType(ReflectionProperty|ReflectionMethod $reflector, ?string $collectionClass): ?string
     {
-        // Приоритет 1: Атрибут Cast на свойстве
-        $attributes = $prop->getAttributes(Cast::class);
+        // Читаем атрибут Cast (может быть как на свойстве, так и на методе)
+        $attributes = $reflector->getAttributes(Cast::class);
         if (!empty($attributes)) {
             return $attributes[0]->newInstance()->className;
         }
 
-        // Приоритет 2: Атрибут CollectionType на классе коллекции
         if ($collectionClass && class_exists($collectionClass)) {
             $reflection = new ReflectionClass($collectionClass);
             $attributes = $reflection->getAttributes(CollectionType::class);
@@ -212,15 +277,10 @@ class SchemaExporter implements SchemaExporterInterface
         return null;
     }
 
-    /**
-     * Транслирует FQCN (Local\Lib\DTO\Models\UserDTO) в Agnostic-формат.
-     * Возвращает [name => 'UserDTO', module => 'Models']
-     */
     private function parseNamespaceAndName(string $fqcn): array
     {
         $parts = explode('\\', trim($fqcn, '\\'));
         $name = array_pop($parts);
-        // Модуль — это последняя директория/часть неймспейса (например, 'Models', 'Enums')
         $module = empty($parts) ? 'Global' : end($parts);
 
         return [
@@ -229,9 +289,6 @@ class SchemaExporter implements SchemaExporterInterface
         ];
     }
 
-    /**
-     * Очищает PHPDoc от технических тегов (@var, @method) и символов комментария.
-     */
     private function parseDocComment(string|false|null $docComment): ?string
     {
         if (!$docComment) {
@@ -242,11 +299,9 @@ class SchemaExporter implements SchemaExporterInterface
         $cleanLines = [];
         foreach ($lines as $line) {
             $line = trim($line);
-            // Убираем /**, */ и начальные *
             $line = preg_replace('/^\/\*\*|^\*\/|^\*\s?/', '', $line);
             $line = trim($line);
 
-            // Игнорируем технические теги, оставляем только человеческий текст
             if ($line !== '' && !str_starts_with($line, '@')) {
                 $cleanLines[] = $line;
             }

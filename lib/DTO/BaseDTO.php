@@ -2,130 +2,199 @@
 
 namespace Local\Lib\DTO;
 
-use Local\Lib\DTO\Utils\StringHelper;
+use Local\Lib\DTO\Attributes\Cast;
+use Local\Lib\DTO\Attributes\CollectionType;
 use Local\Lib\DTO\Attributes\Validation\ValidationRuleInterface;
-use Local\Lib\DTO\Validation\ValidationResult;
-use Local\Lib\DTO\Validation\ValidationError;
 use Local\Lib\DTO\Attributes\Mapping\MapFrom;
 use Local\Lib\DTO\Attributes\Mapping\MapTo;
+use Local\Lib\DTO\Attributes\Mapping\Computed;
 use Local\Lib\DTO\Attributes\Lifecycle\PostHydrate;
 use Local\Lib\DTO\Attributes\Lifecycle\PreExport;
-use Local\Lib\DTO\Attributes\Mapping\Computed;
 use Local\Lib\DTO\Attributes\Behavior\Strict;
-use Local\Lib\DTO\Exceptions\UnmappedPropertiesException;
 use Local\Lib\DTO\Attributes\Behavior\Hidden;
 use Local\Lib\DTO\Attributes\Behavior\Masked;
-use ReflectionParameter;
+use Local\Lib\DTO\Exceptions\UnmappedPropertiesException;
+use Local\Lib\DTO\Validation\ValidationResult;
+use Local\Lib\DTO\Validation\ValidationError;
+use Local\Lib\DTO\Utils\StringHelper;
+use Local\Lib\DTO\BaseCollection;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
+use ReflectionMethod;
+use ReflectionAttribute;
 use ArrayAccess;
 use JsonSerializable;
 
 abstract class BaseDTO implements ArrayAccess, JsonSerializable
 {
-    // Форматы ключей для экспорта
-    public const FORMAT_CAMEL = 'camel';             // userId
-    public const FORMAT_SNAKE = 'snake';             // user_id
-    public const FORMAT_UPPER_SNAKE = 'upper_snake'; // USER_ID
+    public const FORMAT_CAMEL = 'camel';
+    public const FORMAT_SNAKE = 'snake';
+    public const FORMAT_UPPER_SNAKE = 'upper_snake';
+
+    private static array $schemaCache = [];
 
     public function __construct()
     {
-        $properties = self::getReflectedProperties(static::class);
+        $schema = self::getClassSchema(static::class);
 
-        foreach ($properties as $prop) {
-            $type = $prop->getType();
-            if ($type instanceof \ReflectionNamedType && !$type->isBuiltin()) {
-                $typeName = $type->getName();
-                // Если свойство — наследник BaseCollection, инициализируем его пустым объектом
-                if (is_subclass_of($typeName, BaseCollection::class)) {
-                    // Проверяем, не инициализировано ли оно уже (например, в определении класса)
+        foreach ($schema['properties'] as $propName => $propConfig) {
+            $prop = $propConfig['reflector'];
+            if (!empty($propConfig['typeData'])) {
+                $t = $propConfig['typeData'][0];
+                if (!$t['isBuiltin'] && is_subclass_of($t['name'], BaseCollection::class)) {
                     if (!$prop->isInitialized($this)) {
-                        $this->{$prop->getName()} = new $typeName();
+                        $this->{$propName} = new $t['name']();
                     }
                 }
             }
         }
     }
 
-    /**
-     * Магический метод для поддержки setProperty() и getProperty().
-     * Позволяет писать ->setText('val') вместо ->text = 'val'.
-     */
-    public function __call(string $name, array $arguments): mixed
+    private static function getClassSchema(string $className): array
     {
-        $prefix = substr($name, 0, 3);
-        $propertyName = lcfirst(substr($name, 3)); // setUserId -> userId
+        if (isset(self::$schemaCache[$className])) return self::$schemaCache[$className];
 
-        // Проверяем существование свойства (учитывая camelCase)
-        if (!property_exists($this, $propertyName)) {
-            throw new \BadMethodCallException("Property '{$propertyName}' not found in " . static::class);
-        }
+        $reflection = new ReflectionClass($className);
+        $schema = [
+            'reflectionClass' => $reflection,
+            'isStrict' => !empty($reflection->getAttributes(Strict::class)),
+            'constructor' => null,
+            'properties' => [],
+            'computed' => [],
+            'hooks' => ['postHydrate' => [], 'preExport' => []]
+        ];
 
-        if ($prefix === 'get') {
-            return $this->{$propertyName};
-        }
-
-        if ($prefix === 'set') {
-            $value = $arguments[0] ?? null;
-
-            // Получаем рефлексию свойства для процессинга
-            $props = self::getReflectedProperties(static::class);
-            if (isset($props[$propertyName])) {
-                // ВАЖНО: Прогоняем значение через processValue с strict=false (разрешаем кастинг)
-                $value = self::processValue($props[$propertyName], $value, false);
-            }
-
-            $this->{$propertyName} = $value;
-            return $this; // Fluent Interface
-        }
-
-        throw new \BadMethodCallException("Method {$name} does not exist in class " . static::class);
-    }
-
-    /**
-     * Внутренний кэш рефлексии.
-     * Структура: [ClassName => [propName => ReflectionProperty]]
-     */
-    private static array $reflectionCache = [];
-
-    /**
-     * @param array $data Входной массив данных
-     * @param bool $strict Если true — данные не будут приводиться к типам
-     */
-    public static function fromArray(array $data, bool $strict = false): static
-    {
-        $reflection = new ReflectionClass(static::class);
-        $constructor = $reflection->getConstructor();
-        $properties = self::getReflectedProperties(static::class);
-
-        $constructorArgs = [];
-        $handledProperties = [];
-
-        // Массив для отслеживания ключей, которые мы забрали из $data
-        $usedArrayKeys = [];
-
-        // Этап 1: Гидратация через конструктор
-        if ($constructor) {
+        // 1. Конструктор
+        if ($constructor = $reflection->getConstructor()) {
+            $schema['constructor'] = [];
             foreach ($constructor->getParameters() as $param) {
                 $paramName = $param->getName();
-                $prop = $properties[$paramName] ?? null;
+                $mapFromAttr = $param->getAttributes(MapFrom::class);
+                $type = $param->getType();
+                $snake = StringHelper::camel2snake($paramName);
 
-                $key = self::findKeyInArray($data, $param);
+                $schema['constructor'][$paramName] = [
+                    'reflector' => $param,
+                    'allowsNull' => $type === null || $type->allowsNull(),
+                    'mapFrom' => !empty($mapFromAttr) ? $mapFromAttr[0]->newInstance()->key : null,
+                    'searchKeys' => [$paramName, $snake, strtoupper($snake)]
+                ];
+            }
+        }
+
+        // 2. Свойства (максимальный пре-расчет)
+        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $prop) {
+            if ($prop->isStatic()) continue;
+
+            $propName = $prop->getName();
+            $mapFromAttr = $prop->getAttributes(MapFrom::class);
+            $mapToAttr = $prop->getAttributes(MapTo::class);
+            $maskedAttr = $prop->getAttributes(Masked::class);
+
+            $mapFromKey = !empty($mapFromAttr) ? $mapFromAttr[0]->newInstance()->key : null;
+            $mapToKey = !empty($mapToAttr) ? $mapToAttr[0]->newInstance()->key : null;
+            $snake = StringHelper::camel2snake($propName);
+
+            $type = $prop->getType();
+            $typeData = [];
+            if ($type instanceof ReflectionNamedType) {
+                $typeData[] = ['name' => $type->getName(), 'isBuiltin' => $type->isBuiltin(), 'namedType' => $type];
+            } elseif ($type instanceof \ReflectionUnionType) {
+                foreach ($type->getTypes() as $t) {
+                    $typeData[] = ['name' => $t->getName(), 'isBuiltin' => $t->isBuiltin(), 'namedType' => $t];
+                }
+            }
+
+            $validators = [];
+            foreach ($prop->getAttributes(ValidationRuleInterface::class, ReflectionAttribute::IS_INSTANCEOF) as $attr) {
+                $validators[] = $attr->newInstance();
+            }
+
+            $schema['properties'][$propName] = [
+                'reflector' => $prop,
+                'allowsNull' => $type ? $type->allowsNull() : true,
+                'typeData' => $typeData,
+                'mapFrom' => $mapFromKey,
+                'searchKeys' => [$propName, $snake, strtoupper($snake)],
+                'exportKeys' => [
+                    self::FORMAT_CAMEL => $mapToKey ?? $propName,
+                    self::FORMAT_SNAKE => $mapToKey ?? $snake,
+                    self::FORMAT_UPPER_SNAKE => $mapToKey ?? strtoupper($snake),
+                ],
+                'isHidden' => !empty($prop->getAttributes(Hidden::class)),
+                'mask' => !empty($maskedAttr) ? $maskedAttr[0]->newInstance()->mask : null,
+                'validators' => $validators
+            ];
+        }
+
+        // 3. Вычисляемые методы и Хуки
+        foreach ($reflection->getMethods() as $method) {
+            $methodName = $method->getName();
+            $isAccessible = false;
+
+            if (!empty($method->getAttributes(PostHydrate::class))) {
+                if (!$method->isPublic()) $method->setAccessible(true);
+                $schema['hooks']['postHydrate'][] = $method;
+                $isAccessible = true;
+            }
+
+            if (!empty($method->getAttributes(PreExport::class))) {
+                if (!$method->isPublic() && !$isAccessible) $method->setAccessible(true);
+                $schema['hooks']['preExport'][] = $method;
+                $isAccessible = true;
+            }
+
+            if (!empty($method->getAttributes(Computed::class))) {
+                if (!$method->isPublic() && !$isAccessible) $method->setAccessible(true);
+
+                $baseName = (str_starts_with($methodName, 'get') && strlen($methodName) > 3) ? lcfirst(substr($methodName, 3)) : $methodName;
+                $mapToAttr = $method->getAttributes(MapTo::class);
+                $mapToKey = !empty($mapToAttr) ? $mapToAttr[0]->newInstance()->key : null;
+                $snake = StringHelper::camel2snake($baseName);
+
+                $schema['computed'][] = [
+                    'reflector' => $method,
+                    'exportKeys' => [
+                        self::FORMAT_CAMEL => $mapToKey ?? $baseName,
+                        self::FORMAT_SNAKE => $mapToKey ?? $snake,
+                        self::FORMAT_UPPER_SNAKE => $mapToKey ?? strtoupper($snake),
+                    ]
+                ];
+            }
+        }
+
+        self::$schemaCache[$className] = $schema;
+        return $schema;
+    }
+
+    public static function fromArray(array $data, bool $strict = false): static
+    {
+        $schema = self::getClassSchema(static::class);
+        $constructorArgs = [];
+        $handledProperties = [];
+        $usedArrayKeys = [];
+
+        if ($schema['constructor'] !== null) {
+            foreach ($schema['constructor'] as $paramName => $paramConfig) {
+                $key = null;
+                if ($paramConfig['mapFrom'] !== null && array_key_exists($paramConfig['mapFrom'], $data)) {
+                    $key = $paramConfig['mapFrom'];
+                } else {
+                    foreach ($paramConfig['searchKeys'] as $sKey) {
+                        if (array_key_exists($sKey, $data)) { $key = $sKey; break; }
+                    }
+                }
 
                 if ($key !== null) {
-                    $usedArrayKeys[] = $key; // Запоминаем использованный ключ
+                    $usedArrayKeys[] = $key;
                     $value = $data[$key];
-
                     if ($value === null) {
-                        $type = $param->getType();
-                        if ($type === null || $type->allowsNull()) {
-                            $constructorArgs[$paramName] = null;
-                        }
+                        if ($paramConfig['allowsNull']) $constructorArgs[$paramName] = null;
                     } else {
-                        if ($prop) {
-                            $processedValue = self::processValue($prop, $value, $strict);
-                            $constructorArgs[$paramName] = $processedValue;
+                        $propConfig = $schema['properties'][$paramName] ?? null;
+                        if ($propConfig) {
+                            $constructorArgs[$paramName] = self::processValue($propConfig, $value, $strict);
                         } else {
                             $constructorArgs[$paramName] = $value;
                         }
@@ -133,288 +202,162 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
                     $handledProperties[$paramName] = true;
                 }
             }
-
-            $dto = $reflection->newInstanceArgs($constructorArgs);
+            $dto = $schema['reflectionClass']->newInstanceArgs($constructorArgs);
         } else {
             $dto = new static();
         }
 
-        // Этап 2: Гидратация публичных свойств
-        foreach ($properties as $propName => $prop) {
-            if (isset($handledProperties[$propName])) {
-                continue;
+        foreach ($schema['properties'] as $propName => $propConfig) {
+            if (isset($handledProperties[$propName])) continue;
+
+            $key = null;
+            if ($propConfig['mapFrom'] !== null && array_key_exists($propConfig['mapFrom'], $data)) {
+                $key = $propConfig['mapFrom'];
+            } else {
+                foreach ($propConfig['searchKeys'] as $sKey) {
+                    if (array_key_exists($sKey, $data)) { $key = $sKey; break; }
+                }
             }
 
-            $key = self::findKeyInArray($data, $prop);
-
-            if ($key === null) {
-                continue;
-            }
-
-            $usedArrayKeys[] = $key; // Запоминаем использованный ключ
+            if ($key === null) continue;
+            $usedArrayKeys[] = $key;
             $value = $data[$key];
 
             if ($value === null) {
-                if ($prop->getType()?->allowsNull()) {
-                    $prop->setValue($dto, null);
-                }
+                if ($propConfig['allowsNull']) $propConfig['reflector']->setValue($dto, null);
                 continue;
             }
 
-            $processedValue = self::processValue($prop, $value, $strict);
-
-            if (self::isValueCompatible($prop, $processedValue)) {
-                $prop->setValue($dto, $processedValue);
+            $processedValue = self::processValue($propConfig, $value, $strict);
+            if (self::isValueCompatible($propConfig['typeData'], $propConfig['allowsNull'], $processedValue)) {
+                $propConfig['reflector']->setValue($dto, $processedValue);
             }
         }
 
-        // Этап 3: Проверка Strict Mode
-        if (!empty($reflection->getAttributes(Strict::class))) {
-            // Находим ключи, которые были в $data, но не попали в $usedArrayKeys
+        if ($schema['isStrict']) {
             $unmappedKeys = array_diff(array_keys($data), $usedArrayKeys);
-
-            if (!empty($unmappedKeys)) {
-                throw new UnmappedPropertiesException($unmappedKeys);
-            }
+            if (!empty($unmappedKeys)) throw new UnmappedPropertiesException($unmappedKeys);
         }
 
-        // Этап 4: Вызов хуков PostHydrate
-        foreach ($reflection->getMethods() as $method) {
-            if (!empty($method->getAttributes(PostHydrate::class))) {
-                if (!$method->isPublic()) {
-                    $method->setAccessible(true);
-                }
-                $method->invoke($dto);
-            }
-        }
+        foreach ($schema['hooks']['postHydrate'] as $method) $method->invoke($dto);
 
         return $dto;
     }
 
-    /**
-     * Создание коллекции DTO из списка массивов данных.
-     * @param iterable $list Список данных
-     * @param bool $strict Режим строгой типизации
-     * @return BaseCollection<int, static>
-     */
-    public static function fromCollection(iterable $list, bool $strict = false): BaseCollection // Return type changed
-    {
-        $items = [];
-        foreach ($list as $item) {
-            if (is_array($item)) {
-                $items[] = self::fromArray($item, $strict);
-            }
-        }
-        return new BaseCollection($items);
-    }
-
-    /**
-     * Создание DTO из JSON строки.
-     * @throws \JsonException Если JSON некорректен
-     */
-    public static function fromJson(string $json, bool $strict = false): static
-    {
-        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-
-        if (!is_array($data)) {
-            throw new \InvalidArgumentException("JSON must contain an object or array structure.");
-        }
-
-        return self::fromArray($data, $strict);
-    }
-
-    /**
-     * Преобразование DTO в массив.
-     */
     public function toArray(string $format = self::FORMAT_CAMEL): array
     {
-        $reflection = new ReflectionClass(static::class);
-
-        // Этап 1: Вызов хуков PreExport
-        foreach ($reflection->getMethods() as $method) {
-            if (!empty($method->getAttributes(PreExport::class))) {
-                if (!$method->isPublic()) {
-                    $method->setAccessible(true);
-                }
-                $method->invoke($this);
-            }
-        }
-
+        $schema = self::getClassSchema(static::class);
         $result = [];
-        $properties = self::getReflectedProperties(static::class);
 
-        // Этап 2: Формирование массива из свойств
-        foreach ($properties as $propName => $prop) {
-            if (!$prop->isInitialized($this)) {
-                continue;
-            }
+        foreach ($schema['hooks']['preExport'] as $method) $method->invoke($this);
 
-            // Идея 8: Безопасность - Полное скрытие свойства
-            if (!empty($prop->getAttributes(Hidden::class))) {
-                continue;
-            }
+        foreach ($schema['properties'] as $propName => $propConfig) {
+            if ($propConfig['isHidden']) continue;
+            $prop = $propConfig['reflector'];
+            if (!$prop->isInitialized($this)) continue;
 
-            $value = $prop->getValue($this);
-
-            // Идея 8: Безопасность - Маскирование значения
-            $maskedAttrs = $prop->getAttributes(Masked::class);
-            if (!empty($maskedAttrs)) {
-                $value = $maskedAttrs[0]->newInstance()->mask;
-            }
-
-            $mapToAttrs = $prop->getAttributes(MapTo::class);
-            if (!empty($mapToAttrs)) {
-                $key = $mapToAttrs[0]->newInstance()->key;
-            } else {
-                $key = match ($format) {
-                    self::FORMAT_SNAKE => StringHelper::camel2snake($propName),
-                    self::FORMAT_UPPER_SNAKE => strtoupper(StringHelper::camel2snake($propName)),
-                    default => $propName
-                };
-            }
-
-            if ($value instanceof self) {
-                $result[$key] = $value->toArray($format);
-            } elseif (is_array($value)) {
-                $result[$key] = array_map(function ($item) use ($format) {
-                    return ($item instanceof self) ? $item->toArray($format) : $item;
-                }, $value);
-            } else {
-                $result[$key] = $value;
-            }
+            $value = $propConfig['mask'] ?? $prop->getValue($this);
+            $key = $propConfig['exportKeys'][$format];
+            $result[$key] = self::exportValue($value, $format);
         }
 
-        // Этап 3: Вычисляемые свойства (Computed Properties)
-        foreach ($reflection->getMethods() as $method) {
-            if (!empty($method->getAttributes(Computed::class))) {
-                if (!$method->isPublic()) {
-                    $method->setAccessible(true);
-                }
-
-                $value = $method->invoke($this);
-                $methodName = $method->getName();
-
-                if (str_starts_with($methodName, 'get') && strlen($methodName) > 3) {
-                    $baseName = lcfirst(substr($methodName, 3));
-                } else {
-                    $baseName = $methodName;
-                }
-
-                $mapToAttrs = $method->getAttributes(MapTo::class);
-                if (!empty($mapToAttrs)) {
-                    $key = $mapToAttrs[0]->newInstance()->key;
-                } else {
-                    $key = match ($format) {
-                        self::FORMAT_SNAKE => StringHelper::camel2snake($baseName),
-                        self::FORMAT_UPPER_SNAKE => strtoupper(StringHelper::camel2snake($baseName)),
-                        default => $baseName
-                    };
-                }
-
-                if ($value instanceof self) {
-                    $result[$key] = $value->toArray($format);
-                } elseif (is_array($value)) {
-                    $result[$key] = array_map(function ($item) use ($format) {
-                        return ($item instanceof self) ? $item->toArray($format) : $item;
-                    }, $value);
-                } else {
-                    $result[$key] = $value;
-                }
-            }
+        foreach ($schema['computed'] as $compConfig) {
+            $value = $compConfig['reflector']->invoke($this);
+            $key = $compConfig['exportKeys'][$format];
+            $result[$key] = self::exportValue($value, $format);
         }
 
         return $result;
     }
 
-    /**
-     * Валидация данных.
-     * Проверяет обязательность полей, декларативные атрибуты валидации и рекурсивно валидирует вложенные DTO.
-     */
+    private static function exportValue(mixed $value, string $format): mixed
+    {
+        if ($value instanceof self) return $value->toArray($format);
+        if (is_array($value)) return array_map(fn($item) => ($item instanceof self) ? $item->toArray($format) : $item, $value);
+        return $value;
+    }
+
     public function validate(): ValidationResult
     {
         $result = new ValidationResult();
-        $properties = self::getReflectedProperties(static::class);
+        $schema = self::getClassSchema(static::class);
 
-        foreach ($properties as $propName => $prop) {
+        foreach ($schema['properties'] as $propName => $propConfig) {
+            $prop = $propConfig['reflector'];
+
             if (!$prop->isInitialized($this)) {
-                if (!$prop->getType()?->allowsNull()) {
-                    $result->addError(new ValidationError("Field '{$propName}' is required.", "REQUIRED_FIELD_{$propName}"));
-                }
+                if (!$propConfig['allowsNull']) $result->addError(new ValidationError("Field '{$propName}' is required.", "REQUIRED_FIELD_{$propName}"));
                 continue;
             }
 
             $value = $prop->getValue($this);
 
-            // Обработка кастомных атрибутов валидации
-            $attributes = $prop->getAttributes(ValidationRuleInterface::class, \ReflectionAttribute::IS_INSTANCEOF);
-            foreach ($attributes as $attribute) {
-                /** @var ValidationRuleInterface $rule */
-                $rule = $attribute->newInstance();
+            foreach ($propConfig['validators'] as $rule) {
                 $error = $rule->validate($value);
-
-                if ($error !== null) {
-                    // Формируем код ошибки с привязкой к имени свойства, сохраняя текущий стиль проекта
-                    $result->addError(new ValidationError($error->getMessage(), "{$propName}." . $error->getCode()));
-                }
+                if ($error !== null) $result->addError(new ValidationError($error->getMessage(), "{$propName}." . $error->getCode()));
             }
 
             if ($value instanceof self) {
                 $subResult = $value->validate();
                 if (!$subResult->isSuccess()) {
-                    foreach ($subResult->getErrors() as $error) {
-                        $result->addError(new ValidationError($error->getMessage(), "{$propName}." . $error->getCode()));
-                    }
+                    foreach ($subResult->getErrors() as $error) $result->addError(new ValidationError($error->getMessage(), "{$propName}." . $error->getCode()));
                 }
             } elseif (is_array($value) || $value instanceof BaseCollection) {
                 foreach ($value as $index => $item) {
                     if ($item instanceof self) {
                         $subResult = $item->validate();
                         if (!$subResult->isSuccess()) {
-                            foreach ($subResult->getErrors() as $error) {
-                                $result->addError(new ValidationError($error->getMessage(), "{$propName}[{$index}]." . $error->getCode()));
-                            }
+                            foreach ($subResult->getErrors() as $error) $result->addError(new ValidationError($error->getMessage(), "{$propName}[{$index}]." . $error->getCode()));
                         }
                     }
                 }
             }
         }
-
         return $result;
     }
 
-    // --- Protected/Private ---
-
-    /**
-     * Обработка значения перед присвоением.
-     * Использует Pipeline из Casters для разделения ответственности.
-     */
-    private static function processValue(ReflectionProperty $prop, mixed $value, bool $strict): mixed
+    public static function fromCollection(iterable $list, bool $strict = false): BaseCollection
     {
-        $type = $prop->getType();
+        $items = [];
+        foreach ($list as $item) {
+            if (is_array($item)) $items[] = self::fromArray($item, $strict);
+        }
+        return new BaseCollection($items);
+    }
 
-        if (!$type instanceof ReflectionNamedType) {
+    public static function fromJson(string $json, bool $strict = false): static
+    {
+        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($data)) throw new \InvalidArgumentException("JSON must contain an object or array structure.");
+        return self::fromArray($data, $strict);
+    }
+
+    private static function processValue(array $propConfig, mixed $value, bool $strict): mixed
+    {
+        if (empty($propConfig['typeData'])) return $value;
+
+        // Восстанавливаем оригинальное поведение: не пытаемся кастовать Union Types
+        $propType = $propConfig['reflector'] instanceof ReflectionProperty
+            ? $propConfig['reflector']->getType()
+            : null;
+
+        if (!$propType instanceof ReflectionNamedType) {
             return $value;
         }
 
-        $casters = self::getCasters();
+        $type = $propConfig['typeData'][0]['namedType'];
 
-        foreach ($casters as $caster) {
+        foreach (self::getCasters() as $caster) {
             if ($caster->supports($type, $value)) {
-                return $caster->cast($type, $prop, $value, $strict);
+                return $caster->cast($type, $propConfig['reflector'], $value, $strict);
             }
         }
-
         return $value;
     }
 
-    /**
-     * Возвращает зарегистрированные обработчики типов (Pipeline).
-     * @return \Local\Lib\DTO\Casters\CasterInterface[]
-     */
     private static function getCasters(): array
     {
         static $casters = null;
-
         if ($casters === null) {
             $casters = [
                 new \Local\Lib\DTO\Casters\DtoCaster(),
@@ -425,70 +368,18 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
                 new \Local\Lib\DTO\Casters\ScalarCaster(),
             ];
         }
-
         return $casters;
     }
 
-    /**
-     * Поиск ключа в массиве данных с учетом атрибута MapFrom и кэшированием вариантов написания.
-     */
-    private static function findKeyInArray(array $data, ReflectionProperty|ReflectionParameter $reflector): ?string
+    private static function isValueCompatible(array $typeData, bool $allowsNull, mixed $value): bool
     {
-        // 1. Приоритет отдаем явному маппингу
-        $attributes = $reflector->getAttributes(MapFrom::class);
-        if (!empty($attributes)) {
-            $mappedKey = $attributes[0]->newInstance()->key;
-            if (array_key_exists($mappedKey, $data)) {
-                return $mappedKey;
-            }
-        }
+        if (empty($typeData)) return true;
+        if ($value === null) return $allowsNull;
 
-        $propName = $reflector->getName();
-
-        // 2. Ищем точное совпадение
-        if (array_key_exists($propName, $data)) {
-            return $propName;
-        }
-
-        // 3. Фолбэк на snake_case/UPPER_SNAKE с кэшированием
-        static $snakeCache = [];
-
-        if (!isset($snakeCache[$propName])) {
-            $snake = StringHelper::camel2snake($propName);
-            $snakeCache[$propName] = [
-                'snake' => $snake,
-                'upper' => strtoupper($snake)
-            ];
-        }
-
-        $variants = $snakeCache[$propName];
-
-        if (array_key_exists($variants['snake'], $data)) {
-            return $variants['snake'];
-        }
-
-        if (array_key_exists($variants['upper'], $data)) {
-            return $variants['upper'];
-        }
-
-        return null;
-    }
-
-    /**
-     * Проверка совместимости значения с типом свойства.
-     */
-    private static function isValueCompatible(ReflectionProperty $prop, mixed $value): bool
-    {
-        $type = $prop->getType();
-
-        if (!$type) return true;
-        if ($value === null) return $type->allowsNull();
-
-        $checkNamedType = function (ReflectionNamedType $namedType) use ($value) {
-            $typeName = $namedType->getName();
-
-            if ($namedType->isBuiltin()) {
-                return match ($typeName) {
+        foreach ($typeData as $t) {
+            $typeName = $t['name'];
+            if ($t['isBuiltin']) {
+                $compatible = match ($typeName) {
                     'int' => is_int($value),
                     'float' => is_float($value) || is_int($value),
                     'string' => is_string($value),
@@ -498,49 +389,36 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
                     'mixed' => true,
                     default => true
                 };
+                if ($compatible) return true;
+            } else {
+                if ($value instanceof $typeName) return true;
             }
-
-            return $value instanceof $typeName;
-        };
-
-        if ($type instanceof ReflectionNamedType) {
-            return $checkNamedType($type);
         }
-
-        if ($type instanceof \ReflectionUnionType) {
-            foreach ($type->getTypes() as $unionPart) {
-                if ($checkNamedType($unionPart)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
         return false;
     }
 
-    /**
-     * Получение свойств класса с кэшированием.
-     * @return ReflectionProperty[]
-     */
-    private static function getReflectedProperties(string $className): array
+    public function __call(string $name, array $arguments): mixed
     {
-        if (!isset(self::$reflectionCache[$className])) {
-            $reflection = new ReflectionClass($className);
-            $props = $reflection->getProperties(ReflectionProperty::IS_PUBLIC);
+        $prefix = substr($name, 0, 3);
+        $propertyName = lcfirst(substr($name, 3));
 
-            $assocProps = [];
-            foreach ($props as $prop) {
-                $assocProps[$prop->getName()] = $prop;
-            }
-
-            self::$reflectionCache[$className] = $assocProps;
+        if (!property_exists($this, $propertyName)) {
+            throw new \BadMethodCallException("Property '{$propertyName}' not found in " . static::class);
         }
 
-        return self::$reflectionCache[$className];
-    }
+        if ($prefix === 'get') return $this->{$propertyName};
 
-    // --- Реализация интерфейсов ---
+        if ($prefix === 'set') {
+            $value = $arguments[0] ?? null;
+            $schema = self::getClassSchema(static::class);
+            if (isset($schema['properties'][$propertyName])) {
+                $value = self::processValue($schema['properties'][$propertyName], $value, false);
+            }
+            $this->{$propertyName} = $value;
+            return $this;
+        }
+        throw new \BadMethodCallException("Method {$name} does not exist in class " . static::class);
+    }
 
     public function jsonSerialize(): mixed
     {
@@ -559,62 +437,36 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
 
     public function offsetSet($offset, $value): void
     {
-        if (property_exists($this, $offset)) {
-            $this->{$offset} = $value;
-        }
+        if (property_exists($this, $offset)) $this->{$offset} = $value;
     }
 
     public function offsetUnset($offset): void
     {
-        if (property_exists($this, $offset)) {
-            unset($this->{$offset});
-        }
+        if (property_exists($this, $offset)) unset($this->{$offset});
     }
 
-    /**
-     * Возвращает массив, содержащий только указанные ключи.
-     * @param string ...$keys
-     * @return array
-     */
     public function only(string ...$keys): array
     {
-        $array = $this->toArray();
-        return array_intersect_key($array, array_flip($keys));
+        return array_intersect_key($this->toArray(), array_flip($keys));
     }
 
-    /**
-     * Возвращает массив, исключая указанные ключи.
-     * @param string ...$keys
-     * @return array
-     */
     public function except(string ...$keys): array
     {
-        $array = $this->toArray();
-        return array_diff_key($array, array_flip($keys));
+        return array_diff_key($this->toArray(), array_flip($keys));
     }
 
-    /**
-     * Deep Clone implementation.
-     * Гарантирует, что вложенные DTO также клонируются.
-     */
     public function __clone()
     {
-        $properties = self::getReflectedProperties(static::class);
-        foreach ($properties as $propName => $prop) {
-            if (!$prop->isInitialized($this)) {
-                continue;
-            }
+        $schema = self::getClassSchema(static::class);
+        foreach ($schema['properties'] as $propName => $propConfig) {
+            $prop = $propConfig['reflector'];
+            if (!$prop->isInitialized($this)) continue;
 
             $value = $prop->getValue($this);
-
             if (is_object($value) && method_exists($value, '__clone')) {
                 $this->{$propName} = clone $value;
             } elseif (is_array($value)) {
-                // Клонируем массивы объектов
-                $this->{$propName} = array_map(
-                    fn($item) => (is_object($item) ? clone $item : $item),
-                    $value
-                );
+                $this->{$propName} = array_map(fn($item) => (is_object($item) ? clone $item : $item), $value);
             }
         }
     }

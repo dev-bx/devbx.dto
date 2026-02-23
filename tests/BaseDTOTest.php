@@ -141,26 +141,22 @@ class BaseDTOTest extends TestCase
      * Тест Кэширования Рефлексии (Нюанс: Performance)
      * Мы проверяем приватное статическое свойство, чтобы убедиться, что кэш работает.
      */
-    public function testReflectionCacheIsWorking(): void
+    public function testReflectionCacheIsWorking()
     {
-        // Сбрасываем состояние (если тесты запускаются в одном процессе)
-        // Для доступа к приватному статическому свойству используем Reflection
-        $reflectionClass = new \ReflectionClass(BaseDTO::class);
-        $staticProp = $reflectionClass->getProperty('reflectionCache');
-        $staticProp->setAccessible(true);
-        $staticProp->setValue(null, []); // CORRECT
+        // Вызываем fromArray, чтобы кэш заполнился
+        TestUserDTO::fromArray(['id' => 1, 'name' => 'A', 'is_active' => true]);
 
-        // Первое создание объекта
-        TestUserDTO::fromArray(['ID' => 1]);
+        // Проверяем новое имя свойства $schemaCache
+        $reflection = new \ReflectionClass(BaseDTO::class);
+        $cacheProp = $reflection->getProperty('schemaCache');
+        $cacheProp->setAccessible(true);
 
-        // Проверяем, что кэш заполнился
-        $cache = $staticProp->getValue();
-        $this->assertArrayHasKey(TestUserDTO::class, $cache, 'Кэш должен содержать данные по TestUserDTO');
-        $this->assertNotEmpty($cache[TestUserDTO::class], 'Кэш свойств не должен быть пустым');
+        $cache = $cacheProp->getValue();
 
-        // Проверяем, что в кэше лежат ReflectionProperty
-        $firstProp = reset($cache[TestUserDTO::class]);
-        $this->assertInstanceOf(\ReflectionProperty::class, $firstProp);
+        $this->assertIsArray($cache);
+        $this->assertArrayHasKey(TestUserDTO::class, $cache);
+        $this->assertArrayHasKey('properties', $cache[TestUserDTO::class]);
+        $this->assertNotEmpty($cache[TestUserDTO::class]['properties']);
     }
 
     /**
