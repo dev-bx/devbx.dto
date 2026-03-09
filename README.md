@@ -1,3 +1,5 @@
+[![PHPUnit Tests](https://github.com/dev-bx/devbx.dto/actions/workflows/tests.yml/badge.svg)](https://github.com/dev-bx/devbx.dto/actions)
+
 # DevBX Data Transfer Objects (DTO) Library
 
 Мощная, строго типизированная и независимая от фреймворков библиотека DTO для PHP 8.2+.
