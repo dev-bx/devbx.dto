@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO;
+namespace DevBX\DTO;
 
 use ArrayAccess;
 use Countable;
@@ -9,7 +9,7 @@ use JsonSerializable;
 use Traversable;
 use ArrayIterator;
 use ReflectionClass;
-use Local\Lib\DTO\Attributes\CollectionType;
+use DevBX\DTO\Attributes\CollectionType;
 
 /**
  * Базовый класс для коллекций DTO.

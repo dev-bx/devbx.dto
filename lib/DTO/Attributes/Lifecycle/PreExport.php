@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Attributes\Lifecycle;
+namespace DevBX\DTO\Attributes\Lifecycle;
 
 use Attribute;
 

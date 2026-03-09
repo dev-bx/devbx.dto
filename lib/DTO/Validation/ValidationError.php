@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Validation;
+namespace DevBX\DTO\Validation;
 
 class ValidationError
 {

@@ -1,8 +1,8 @@
 <?php
 
-namespace Local\Lib\DTO\Dev;
+namespace DevBX\DTO\Dev;
 
-use Local\Lib\DTO\Utils\StringHelper;
+use DevBX\DTO\Utils\StringHelper;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
@@ -165,7 +165,7 @@ class DTOGenerator
         $propertiesCode = [];
         $phpDocLines = [];
         $imports = [
-            'Local\Lib\DTO\BaseDTO',
+            'DevBX\DTO\BaseDTO',
         ];
         $needsCast = false;
 
@@ -218,7 +218,7 @@ class DTOGenerator
         }
 
         if ($needsCast) {
-            $imports[] = 'Local\Lib\DTO\Attributes\Cast';
+            $imports[] = 'DevBX\DTO\Attributes\Cast';
         }
 
         $propsOutput = implode("\n", $propertiesCode);
@@ -352,11 +352,11 @@ class DTOGenerator
         $returnType = $isStub ? '\\' . $className : 'self';
 
         // Определяем, является ли класс коллекцией
-        if ($reflection->isSubclassOf(\Local\Lib\DTO\BaseCollection::class)) {
+        if ($reflection->isSubclassOf(\DevBX\DTO\BaseCollection::class)) {
             $itemType = 'mixed';
 
             // 1. Поиск через атрибут #[CollectionType]
-            $collectionAttrs = $reflection->getAttributes(\Local\Lib\DTO\Attributes\CollectionType::class);
+            $collectionAttrs = $reflection->getAttributes(\DevBX\DTO\Attributes\CollectionType::class);
             if (!empty($collectionAttrs)) {
                 $itemType = '\\' . ltrim($collectionAttrs[0]->newInstance()->className, '\\');
             }

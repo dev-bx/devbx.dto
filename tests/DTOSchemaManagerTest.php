@@ -1,14 +1,14 @@
 <?php
 
-namespace Tests\Local\Lib\DTO;
+namespace Tests\DevBX\DTO;
 
 use PHPUnit\Framework\TestCase;
-use Local\Lib\DTO\Schema\SchemaValidator;
-use Local\Lib\DTO\Schema\SchemaExporter;
-use Local\Lib\DTO\Schema\SchemaImporter;
-use Local\Lib\DTO\Schema\DTOSchemaManager;
+use DevBX\DTO\Schema\SchemaValidator;
+use DevBX\DTO\Schema\SchemaExporter;
+use DevBX\DTO\Schema\SchemaImporter;
+use DevBX\DTO\Schema\DTOSchemaManager;
 // Импорт класса фикстуры
-use Tests\Local\Lib\DTO\Fixtures\ExportTestDTO;
+use Tests\DevBX\DTO\Fixtures\ExportTestDTO;
 
 class DTOSchemaManagerTest extends TestCase
 {
@@ -25,11 +25,11 @@ class DTOSchemaManagerTest extends TestCase
             require_once $fixtureFile;
         }
 
-        $validator = new \Local\Lib\DTO\Schema\SchemaValidator();
-        $exporter = new \Local\Lib\DTO\Schema\SchemaExporter();
-        $importer = new \Local\Lib\DTO\Schema\SchemaImporter('Tests\Local\Lib\DTO\Generated');
+        $validator = new \DevBX\DTO\Schema\SchemaValidator();
+        $exporter = new \DevBX\DTO\Schema\SchemaExporter();
+        $importer = new \DevBX\DTO\Schema\SchemaImporter('Tests\DevBX\DTO\Generated');
 
-        $this->manager = new \Local\Lib\DTO\Schema\DTOSchemaManager($validator, $exporter, $importer);
+        $this->manager = new \DevBX\DTO\Schema\DTOSchemaManager($validator, $exporter, $importer);
 
         // Подготовка временной директории для генерации файлов
         $this->tempDir = __DIR__ . '/temp_schema_test';
@@ -86,7 +86,7 @@ class DTOSchemaManagerTest extends TestCase
         $phpCode = file_get_contents($expectedPhpFile);
 
         // Проверка генерации кода (без предсказаний, строго 1 в 1)
-        $this->assertStringContainsString('namespace Tests\Local\Lib\DTO\Generated\Models;', $phpCode);
+        $this->assertStringContainsString('namespace Tests\DevBX\DTO\Generated\Models;', $phpCode);
         $this->assertStringContainsString('class GeneratedUserDTO extends BaseDTO', $phpCode);
 
         // Теперь генератор корректно оставляет $id без дефолтного null, так как isNullable = false

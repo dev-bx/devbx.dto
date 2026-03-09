@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Schema;
+namespace DevBX\DTO\Schema;
 
 class SchemaImporter implements SchemaImporterInterface
 {
@@ -8,7 +8,7 @@ class SchemaImporter implements SchemaImporterInterface
      * @param string $baseNamespace Базовый неймспейс проекта, к которому будут прибавляться модули.
      */
     public function __construct(
-        private string $baseNamespace = 'Local\Lib\DTO'
+        private string $baseNamespace = 'DevBX\DTO'
     ) {}
 
     /**

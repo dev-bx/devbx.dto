@@ -1,24 +1,24 @@
 <?php
 
-namespace Local\Lib\DTO;
+namespace DevBX\DTO;
 
-use Local\Lib\DTO\Attributes\Cast;
-use Local\Lib\DTO\Attributes\CollectionType;
-use Local\Lib\DTO\Attributes\Validation\ValidationRuleInterface;
-use Local\Lib\DTO\Attributes\Mapping\MapFrom;
-use Local\Lib\DTO\Attributes\Mapping\MapTo;
-use Local\Lib\DTO\Attributes\Mapping\Computed;
-use Local\Lib\DTO\Attributes\Lifecycle\PostHydrate;
-use Local\Lib\DTO\Attributes\Lifecycle\PreExport;
-use Local\Lib\DTO\Attributes\Behavior\Strict;
-use Local\Lib\DTO\Attributes\Behavior\Hidden;
-use Local\Lib\DTO\Attributes\Behavior\Masked;
-use Local\Lib\DTO\Attributes\Behavior\Initialize;
-use Local\Lib\DTO\Exceptions\UnmappedPropertiesException;
-use Local\Lib\DTO\Validation\ValidationResult;
-use Local\Lib\DTO\Validation\ValidationError;
-use Local\Lib\DTO\Utils\StringHelper;
-use Local\Lib\DTO\BaseCollection;
+use DevBX\DTO\Attributes\Cast;
+use DevBX\DTO\Attributes\CollectionType;
+use DevBX\DTO\Attributes\Validation\ValidationRuleInterface;
+use DevBX\DTO\Attributes\Mapping\MapFrom;
+use DevBX\DTO\Attributes\Mapping\MapTo;
+use DevBX\DTO\Attributes\Mapping\Computed;
+use DevBX\DTO\Attributes\Lifecycle\PostHydrate;
+use DevBX\DTO\Attributes\Lifecycle\PreExport;
+use DevBX\DTO\Attributes\Behavior\Strict;
+use DevBX\DTO\Attributes\Behavior\Hidden;
+use DevBX\DTO\Attributes\Behavior\Masked;
+use DevBX\DTO\Attributes\Behavior\Initialize;
+use DevBX\DTO\Exceptions\UnmappedPropertiesException;
+use DevBX\DTO\Validation\ValidationResult;
+use DevBX\DTO\Validation\ValidationError;
+use DevBX\DTO\Utils\StringHelper;
+use DevBX\DTO\BaseCollection;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
@@ -364,12 +364,12 @@ abstract class BaseDTO implements JsonSerializable
         static $casters = null;
         if ($casters === null) {
             $casters = [
-                new \Local\Lib\DTO\Casters\DtoCaster(),
-                new \Local\Lib\DTO\Casters\CollectionCaster(),
-                new \Local\Lib\DTO\Casters\ArrayCaster(),
-                new \Local\Lib\DTO\Casters\EnumCaster(),
-                new \Local\Lib\DTO\Casters\DateTimeCaster(),
-                new \Local\Lib\DTO\Casters\ScalarCaster(),
+                new \DevBX\DTO\Casters\DtoCaster(),
+                new \DevBX\DTO\Casters\CollectionCaster(),
+                new \DevBX\DTO\Casters\ArrayCaster(),
+                new \DevBX\DTO\Casters\EnumCaster(),
+                new \DevBX\DTO\Casters\DateTimeCaster(),
+                new \DevBX\DTO\Casters\ScalarCaster(),
             ];
         }
         return $casters;

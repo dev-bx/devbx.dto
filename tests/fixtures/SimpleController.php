@@ -1,12 +1,12 @@
 <?php
 
-namespace Tests\Local\Lib\DTO\Fixtures;
+namespace Tests\DevBX\DTO\Fixtures;
 
-use Local\Lib\DTO\Http\AbstractController;
-use Local\Lib\DTO\BaseDTO;
-use Local\Lib\DTO\Attributes\Mapping\Query;
-use Local\Lib\DTO\Attributes\Mapping\Body;
-use Local\Lib\DTO\Attributes\Validation\Min;
+use DevBX\DTO\Http\AbstractController;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Mapping\Query;
+use DevBX\DTO\Attributes\Mapping\Body;
+use DevBX\DTO\Attributes\Validation\Min;
 
 // 1. Наш защищенный Readonly DTO со всеми фичами
 readonly class UpdateUserRequestDTO extends BaseDTO

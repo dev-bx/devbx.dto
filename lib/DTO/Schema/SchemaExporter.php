@@ -1,15 +1,15 @@
 <?php
 
-namespace Local\Lib\DTO\Schema;
+namespace DevBX\DTO\Schema;
 
-use Local\Lib\DTO\BaseCollection;
-use Local\Lib\DTO\Attributes\Cast;
-use Local\Lib\DTO\Attributes\CollectionType;
-use Local\Lib\DTO\Attributes\Behavior\Hidden;
-use Local\Lib\DTO\Attributes\Behavior\Masked;
-use Local\Lib\DTO\Attributes\Mapping\Computed;
-use Local\Lib\DTO\Attributes\Mapping\MapTo;
-use Local\Lib\DTO\Attributes\Validation\Min;
+use DevBX\DTO\BaseCollection;
+use DevBX\DTO\Attributes\Cast;
+use DevBX\DTO\Attributes\CollectionType;
+use DevBX\DTO\Attributes\Behavior\Hidden;
+use DevBX\DTO\Attributes\Behavior\Masked;
+use DevBX\DTO\Attributes\Mapping\Computed;
+use DevBX\DTO\Attributes\Mapping\MapTo;
+use DevBX\DTO\Attributes\Validation\Min;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;

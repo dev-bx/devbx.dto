@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Schema;
+namespace DevBX\DTO\Schema;
 
 /**
  * Интерфейс генератора PHP кода на основе языково-независимой схемы.

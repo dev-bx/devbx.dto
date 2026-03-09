@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Utils;
+namespace DevBX\DTO\Utils;
 
 /**
  * Внутренняя утилита для работы со строками.

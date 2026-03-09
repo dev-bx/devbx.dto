@@ -1,10 +1,10 @@
 <?php
 
-namespace Tests\Local\Lib\DTO;
+namespace Tests\DevBX\DTO;
 
 use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
-use Local\Lib\DTO\Utils\StringHelper;
+use DevBX\DTO\Utils\StringHelper;
 
 class StringHelperTest extends TestCase
 {

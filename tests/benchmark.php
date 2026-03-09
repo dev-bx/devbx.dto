@@ -3,12 +3,12 @@
 // Предполагается стандартный автозагрузчик Composer, адаптируйте путь при необходимости
 require_once __DIR__ . '/../../vendor/autoload.php';
 
-use Local\Lib\DTO\BaseDTO;
-use Local\Lib\DTO\BaseCollection;
-use Local\Lib\DTO\Attributes\CollectionType;
-use Local\Lib\DTO\Attributes\Cast;
-use Local\Lib\DTO\Attributes\Mapping\MapFrom;
-use Local\Lib\DTO\Attributes\Mapping\Computed;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\BaseCollection;
+use DevBX\DTO\Attributes\CollectionType;
+use DevBX\DTO\Attributes\Cast;
+use DevBX\DTO\Attributes\Mapping\MapFrom;
+use DevBX\DTO\Attributes\Mapping\Computed;
 // --- 1. Подготовка классов для высокой нагрузки на рефлексию ---
 
 class BenchItemDTO extends BaseDTO

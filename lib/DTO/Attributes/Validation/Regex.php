@@ -1,9 +1,9 @@
 <?php
 
-namespace Local\Lib\DTO\Attributes\Validation;
+namespace DevBX\DTO\Attributes\Validation;
 
 use Attribute;
-use Local\Lib\DTO\Validation\ValidationError;
+use DevBX\DTO\Validation\ValidationError;
 
 #[Attribute(Attribute::TARGET_PROPERTY)]
 class Regex implements ValidationRuleInterface

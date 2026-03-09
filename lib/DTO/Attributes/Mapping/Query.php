@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Attributes\Mapping;
+namespace DevBX\DTO\Attributes\Mapping;
 
 use Attribute;
 

@@ -1,8 +1,8 @@
 <?php
 
-namespace Tests\Local\Lib\DTO\Fixtures;
+namespace Tests\DevBX\DTO\Fixtures;
 
-use Local\Lib\DTO\BaseDTO;
+use DevBX\DTO\BaseDTO;
 
 /**
  * Класс для тестирования экспортера

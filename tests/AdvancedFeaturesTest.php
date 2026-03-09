@@ -1,26 +1,26 @@
 <?php
 
-namespace Tests\Local\Lib\DTO;
+namespace Tests\DevBX\DTO;
 
 use PHPUnit\Framework\TestCase;
-use Local\Lib\DTO\BaseDTO;
-use Local\Lib\DTO\Validation\ValidationResult;
-use Local\Lib\DTO\Validation\ValidationError;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Validation\ValidationResult;
+use DevBX\DTO\Validation\ValidationError;
 
 // Имитация атрибутов и абстрактных классов, которые мы спроектировали
-use Local\Lib\DTO\Attributes\Validation\Min;
-use Local\Lib\DTO\Attributes\Mapping\Query;
-use Local\Lib\DTO\Attributes\Mapping\Body;
-use Local\Lib\DTO\Attributes\Mapping\MapFrom;
-use Local\Lib\DTO\Attributes\Mapping\MapTo;
-use Local\Lib\DTO\Http\AbstractController;
-use Local\Lib\DTO\Attributes\Lifecycle\PostHydrate;
-use Local\Lib\DTO\Attributes\Lifecycle\PreExport;
-use Local\Lib\DTO\Attributes\Mapping\Computed;
-use Local\Lib\DTO\Attributes\Behavior\Strict;
-use Local\Lib\DTO\Exceptions\UnmappedPropertiesException;
-use Local\Lib\DTO\Attributes\Behavior\Hidden;
-use Local\Lib\DTO\Attributes\Behavior\Masked;
+use DevBX\DTO\Attributes\Validation\Min;
+use DevBX\DTO\Attributes\Mapping\Query;
+use DevBX\DTO\Attributes\Mapping\Body;
+use DevBX\DTO\Attributes\Mapping\MapFrom;
+use DevBX\DTO\Attributes\Mapping\MapTo;
+use DevBX\DTO\Http\AbstractController;
+use DevBX\DTO\Attributes\Lifecycle\PostHydrate;
+use DevBX\DTO\Attributes\Lifecycle\PreExport;
+use DevBX\DTO\Attributes\Mapping\Computed;
+use DevBX\DTO\Attributes\Behavior\Strict;
+use DevBX\DTO\Exceptions\UnmappedPropertiesException;
+use DevBX\DTO\Attributes\Behavior\Hidden;
+use DevBX\DTO\Attributes\Behavior\Masked;
 
 // --- ТЕСТОВЫЕ ФИКСТУРЫ (Fixtures) ---
 

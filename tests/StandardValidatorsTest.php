@@ -1,13 +1,13 @@
 <?php
 
-namespace Tests\Local\Lib\DTO;
+namespace Tests\DevBX\DTO;
 
 use PHPUnit\Framework\TestCase;
-use Local\Lib\DTO\BaseDTO;
-use Local\Lib\DTO\Attributes\Validation\Max;
-use Local\Lib\DTO\Attributes\Validation\Email;
-use Local\Lib\DTO\Attributes\Validation\Regex;
-use Local\Lib\DTO\Attributes\Validation\InArray;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Validation\Max;
+use DevBX\DTO\Attributes\Validation\Email;
+use DevBX\DTO\Attributes\Validation\Regex;
+use DevBX\DTO\Attributes\Validation\InArray;
 
 // --- ТЕСТОВАЯ ФИКСТУРА ---
 class UserRegistrationDTO extends BaseDTO

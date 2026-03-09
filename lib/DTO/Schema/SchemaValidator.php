@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Schema;
+namespace DevBX\DTO\Schema;
 
 use InvalidArgumentException;
 

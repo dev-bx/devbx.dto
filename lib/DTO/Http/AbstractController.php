@@ -1,10 +1,10 @@
 <?php
 
-namespace Local\Lib\DTO\Http;
+namespace DevBX\DTO\Http;
 
-use Local\Lib\DTO\BaseDTO;
-use Local\Lib\DTO\Attributes\Mapping\Query;
-use Local\Lib\DTO\Attributes\Mapping\Body;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Mapping\Query;
+use DevBX\DTO\Attributes\Mapping\Body;
 use ReflectionClass;
 use ReflectionProperty;
 use ReflectionParameter;

@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Attributes;
+namespace DevBX\DTO\Attributes;
 
 use Attribute;
 

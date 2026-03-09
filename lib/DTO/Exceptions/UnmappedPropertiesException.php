@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Exceptions;
+namespace DevBX\DTO\Exceptions;
 
 use RuntimeException;
 

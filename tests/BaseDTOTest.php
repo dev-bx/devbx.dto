@@ -1,11 +1,11 @@
 <?php
 
-namespace Tests\Local\Lib\DTO;
+namespace Tests\DevBX\DTO;
 
-use Local\Lib\DTO\BaseDTO;
-use Local\Lib\DTO\Attributes\Cast;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Cast;
 use PHPUnit\Framework\TestCase;
-use Local\Lib\DTO\Dev\DTOGenerator;
+use DevBX\DTO\Dev\DTOGenerator;
 
 // --- ТЕСТОВЫЕ DTO (Fixtures) ---
 class TestAddressDTO extends BaseDTO
@@ -250,16 +250,35 @@ class BaseDTOTest extends TestCase
     }
 
     /**
-     * Тест ArrayAccess
+     * Тест запрета чтения свойств объекта как массива
      */
-    public function testArrayAccess(): void
+    public function testArrayAccessReadIsForbidden(): void
     {
         $dto = new TestUserDTO();
-        $dto->name = 'ArrayAccess';
-        $this->assertEquals('ArrayAccess', $dto['name']);
+        $dto->name = 'TestRead';
 
+        // Если интерфейс ArrayAccess был полностью удален, PHP (начиная с 8.0) выбросит \Error.
+        // Если вы оставили интерфейс, но выбрасываете свое исключение внутри offsetGet()
+        // (например, \LogicException или \RuntimeException), замените \Error::class на ваш класс.
+        $this->expectException(\Error::class);
+
+        // Попытка прочитать свойство как элемент массива приведет к падению теста,
+        // которое перехватит expectException
+        $value = $dto['name'];
+    }
+
+    /**
+     * Тест запрета записи свойств объекта как массива
+     */
+    public function testArrayAccessWriteIsForbidden(): void
+    {
+        $dto = new TestUserDTO();
+
+        // Аналогично: \Error::class при удаленном интерфейсе, либо ваш класс исключения
+        $this->expectException(\Error::class);
+
+        // Попытка записать свойство как элемент массива
         $dto['name'] = 'Changed';
-        $this->assertEquals('Changed', $dto->name);
     }
 
     /**
@@ -348,30 +367,6 @@ class BaseDTOTest extends TestCase
     }
 
     /**
-     * Тест полного цикла ArrayAccess: isset и unset
-     * (Gap Analysis: ArrayAccess Existence)
-     */
-    public function testArrayAccessIssetAndUnset(): void
-    {
-        $dto = new TestUserDTO();
-        $dto->name = 'Test Name';
-
-        // 1. Проверка isset для существующего и инициализированного
-        $this->assertTrue(isset($dto['name']), 'isset должен вернуть true для заданного поля');
-
-        // 2. Проверка isset для существующего, но неинициализированного
-        // (email у нас ?string без дефолта)
-        $this->assertFalse(isset($dto['email']), 'isset должен вернуть false для неинициализированного поля');
-
-        // 3. Проверка unset
-        unset($dto['name']);
-        // Используем Reflection, чтобы проверить, что свойство стало uninitialized
-        $rp = new \ReflectionProperty($dto, 'name');
-        $this->assertFalse($rp->isInitialized($dto), 'После unset поле должно стать неинициализированным');
-        $this->assertFalse(isset($dto['name']));
-    }
-
-    /**
      * Тест JSON сериализации
      * (Gap Analysis: JSON Serialization)
      */
@@ -436,16 +431,17 @@ class BaseDTOTest extends TestCase
 
         $code = DTOGenerator::generate($className, $namespace, $data);
 
-        // Мы не исполняем код, а проверяем наличие сгенерированных комментариев-подсказок
+        // Мы не исполняем код, а проверяем корректность сгенерированных свойств и атрибутов
 
         // 1. SIMPLE_LIST -> array // List of int
         $this->assertStringContainsString('public array $simpleList; // List of int', $code);
 
-        // 2. OBJECT_LIST -> array // Consider using #[Cast(ItemDTO::class)]
-        $this->assertStringContainsString('Consider using #[Cast(ItemDTO::class)]', $code);
+        // 2. OBJECT_LIST -> генерируется дочерний DTO и проставляется атрибут Cast
+        $this->assertStringContainsString('#[Cast(ObjectListItemDTO::class)]', $code);
+        $this->assertStringContainsString('public array $objectList; // List of ObjectListItemDTO', $code);
 
-        // 3. NESTED_OBJ -> array // Nested structure. Consider creating a separate DTO
-        $this->assertStringContainsString('Nested structure', $code);
+        // 3. NESTED_OBJ -> генерируется строго типизированное свойство с новым дочерним DTO
+        $this->assertStringContainsString('public NestedObjDTO $nestedObj;', $code);
     }
 
     /**
@@ -494,7 +490,7 @@ class BaseDTOTest extends TestCase
 
     /**
      * Тест на точность генератора типов (Detection Accuracy).
-     * Проверяем баг: строка "12.50" (цена) не должна превращаться в int.
+     * Проверяет, что строка "12.50" (цена) не превращается в int, а корректно распознается как float.
      */
     public function testGeneratorFloatDetection(): void
     {
@@ -506,16 +502,13 @@ class BaseDTOTest extends TestCase
         $data = ['PRICE' => '12.50'];
         $code = DTOGenerator::generate('PriceDTO', 'Tests', $data);
 
-        // Сейчас ваша логика detectType использует is_numeric(), который вернет true.
-        // И код генератора предложит: public int $price;
-        // Это приведет к потере копеек (12.50 -> 12).
-
-        // Этот тест должен упасть, сигнализируя, что генератор нужно доработать
+        // Генератор был доработан, чтобы корректно распознавать дробные значения
         $this->assertStringNotContainsString(
             'public int $price;',
             $code,
             'Ошибка: Генератор предлагает int для дробного числа "12.50". Возможна потеря данных.'
         );
+        $this->assertStringContainsString('public float $price;', $code);
     }
 
     public function testEnumHydration(): void
@@ -701,13 +694,6 @@ class BaseDTOTest extends TestCase
         // 2. Проверяем DateTimeImmutable
         $this->assertInstanceOf(\DateTimeImmutable::class, $dto->updated);
         $this->assertEquals($dateStr, $dto->updated->format('Y-m-d H:i:s'));
-
-        // 3. Проверяем, что некорректная дата остается строкой (и потенциально вызывает TypeError при strict=true,
-        // но при strict=false просто передается, если бы тип был mixed/string.
-        // Здесь у нас строгая типизация св-ва, поэтому BaseDTO должен попытаться создать DateTime,
-        // а если упадет Exception внутри конструктора DateTime -> вернет value as is.
-        // Так как свойство типизировано строго как DateTime, PHP выбросит TypeError при присвоении строки.
-        // Это ожидаемое поведение (Fail fast), но проверим, что processValue пытается это сделать.
     }
 
     /**
@@ -828,14 +814,14 @@ class BaseDTOTest extends TestCase
         $result = $dto->validate();
 
         // Проверяем типы новых объектов валидации
-        $this->assertInstanceOf(\Local\Lib\DTO\Validation\ValidationResult::class, $result);
+        $this->assertInstanceOf(\DevBX\DTO\Validation\ValidationResult::class, $result);
         $this->assertFalse($result->isSuccess());
 
         $errors = $result->getErrors();
         $this->assertNotEmpty($errors);
 
         $firstError = reset($errors);
-        $this->assertInstanceOf(\Local\Lib\DTO\Validation\ValidationError::class, $firstError);
+        $this->assertInstanceOf(\DevBX\DTO\Validation\ValidationError::class, $firstError);
 
         // Проверяем, что код ошибки пробрасывается корректно
         // Для TestUserDTO ожидаем 'REQUIRED_FIELD_id'
@@ -871,7 +857,7 @@ class BaseDTOTest extends TestCase
         $user2 = new TestUserDTO(); $user2->id = 2; $user2->name = 'Bob'; $user2->isActive = false;
         $user3 = new TestUserDTO(); $user3->id = 3; $user3->name = 'Charlie'; $user3->isActive = true;
 
-        $collection = new \Local\Lib\DTO\BaseCollection([$user1, $user2, $user3]);
+        $collection = new \DevBX\DTO\BaseCollection([$user1, $user2, $user3]);
 
         // 2. Count & Access
         $this->assertCount(3, $collection);
@@ -888,7 +874,7 @@ class BaseDTOTest extends TestCase
         // 4. Filter (Найти всех активных)
         $activeUsers = $collection->filter(fn($u) => $u->isActive);
         $this->assertCount(2, $activeUsers);
-        $this->assertInstanceOf(\Local\Lib\DTO\BaseCollection::class, $activeUsers);
+        $this->assertInstanceOf(\DevBX\DTO\BaseCollection::class, $activeUsers);
         // Проверяем сброс ключей или сохранение порядка
         $this->assertSame('Alice', $activeUsers[0]->name);
         $this->assertSame('Charlie', $activeUsers[1]->name);
@@ -910,7 +896,7 @@ class BaseDTOTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
         // Попытка добавить обычный массив вместо DTO
-        new \Local\Lib\DTO\BaseCollection([['id' => 1]]);
+        new \DevBX\DTO\BaseCollection([['id' => 1]]);
     }
 
     /**
@@ -925,7 +911,7 @@ class BaseDTOTest extends TestCase
             // Эмуляция класса через eval, т.к. PHP не поддерживает анонимные классы в качестве типов свойств так легко
             eval('
                 namespace Tests;
-                use Local\Lib\DTO\BaseCollection;
+                use DevBX\DTO\BaseCollection;
                 class UserCollection extends BaseCollection {}
             ');
         }
@@ -951,7 +937,7 @@ class BaseDTOTest extends TestCase
         // 5. Проверки
         // а) Тип свойства
         $this->assertInstanceOf(\Tests\UserCollection::class, $dto->users);
-        $this->assertInstanceOf(\Local\Lib\DTO\BaseCollection::class, $dto->users);
+        $this->assertInstanceOf(\DevBX\DTO\BaseCollection::class, $dto->users);
 
         // б) Содержимое
         $this->assertCount(2, $dto->users);
@@ -971,12 +957,12 @@ class BaseDTOTest extends TestCase
         $user3 = new TestUserDTO(); $user3->id = 3; $user3->name = 'Charlie'; $user3->isActive = true;
         $user4 = new TestUserDTO(); $user4->id = 4; $user4->name = 'Alice'; $user4->isActive = false;
 
-        $collection = new \Local\Lib\DTO\BaseCollection([$user1, $user2, $user3, $user4]);
+        $collection = new \DevBX\DTO\BaseCollection([$user1, $user2, $user3, $user4]);
 
         // 1. Тест where
         $activeUsers = $collection->where('isActive', true);
         $this->assertCount(2, $activeUsers);
-        $this->assertInstanceOf(\Local\Lib\DTO\BaseCollection::class, $activeUsers);
+        $this->assertInstanceOf(\DevBX\DTO\BaseCollection::class, $activeUsers);
         $this->assertSame(1, $activeUsers->first()->id);
 
         $aliceUsers = $collection->where('name', '=', 'Alice');
@@ -1004,7 +990,7 @@ class BaseDTOTest extends TestCase
         // 4. Тест groupBy
         $groupedByName = $collection->groupBy('name');
         $this->assertCount(3, $groupedByName);
-        $this->assertInstanceOf(\Local\Lib\DTO\BaseCollection::class, $groupedByName['Alice']);
+        $this->assertInstanceOf(\DevBX\DTO\BaseCollection::class, $groupedByName['Alice']);
         $this->assertCount(2, $groupedByName['Alice']);
         $this->assertSame(1, $groupedByName['Alice'][0]->id);
         $this->assertSame(4, $groupedByName['Alice'][1]->id);
@@ -1044,7 +1030,7 @@ class BaseDTOTest extends TestCase
      */
     public function testCollectionAdditionalMethods(): void
     {
-        $collection = new \Local\Lib\DTO\BaseCollection();
+        $collection = new \DevBX\DTO\BaseCollection();
 
         // Тест isEmpty / isNotEmpty
         $this->assertTrue($collection->isEmpty());
@@ -1094,14 +1080,14 @@ class BaseDTOTest extends TestCase
 
         // 2. Тест генерации IDE аннотаций для неймспейса
         // Используем текущий неймспейс фикстур
-        $annotations = DTOGenerator::generateIdeAnnotations('Tests\Local\Lib\DTO');
+        $annotations = DTOGenerator::generateIdeAnnotations('Tests\DevBX\DTO');
 
         // Проверяем, что сгенерирован правильный каркас файла
-        $this->assertStringContainsString('namespace Tests\Local\Lib\DTO {', $annotations);
-        $this->assertStringContainsString('class TestUserDTO extends \Local\Lib\DTO\BaseDTO {}', $annotations);
+        $this->assertStringContainsString('namespace Tests\DevBX\DTO {', $annotations);
+        $this->assertStringContainsString('class TestUserDTO extends \DevBX\DTO\BaseDTO {}', $annotations);
 
         // В режиме заглушки возвращаемый тип должен быть полным классом, а не self
-        $this->assertStringContainsString('@method \Tests\Local\Lib\DTO\TestUserDTO setId(int $value)', $annotations);
+        $this->assertStringContainsString('@method \Tests\DevBX\DTO\TestUserDTO setId(int $value)', $annotations);
     }
 
 }

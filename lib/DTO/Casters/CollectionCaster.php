@@ -1,11 +1,11 @@
 <?php
 
-namespace Local\Lib\DTO\Casters;
+namespace DevBX\DTO\Casters;
 
-use Local\Lib\DTO\BaseDTO;
-use Local\Lib\DTO\BaseCollection;
-use Local\Lib\DTO\Attributes\Cast;
-use Local\Lib\DTO\Attributes\CollectionType;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\BaseCollection;
+use DevBX\DTO\Attributes\Cast;
+use DevBX\DTO\Attributes\CollectionType;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;

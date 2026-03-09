@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Schema;
+namespace DevBX\DTO\Schema;
 
 use RuntimeException;
 use JsonException;
@@ -19,7 +19,7 @@ class DTOSchemaManager
 
     /**
      * Экспортирует PHP-класс в JSON-файл схемы.
-     * * @param class-string $className Полное имя класса (например, 'Local\Lib\DTO\Models\UserDTO')
+     * * @param class-string $className Полное имя класса (например, 'DevBX\DTO\Models\UserDTO')
      * @param string $filePath Путь для сохранения JSON файла (например, '/path/to/schema/user.json')
      * @return bool True в случае успеха
      * @throws RuntimeException|JsonException

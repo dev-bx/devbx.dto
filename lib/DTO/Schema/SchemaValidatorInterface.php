@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Schema;
+namespace DevBX\DTO\Schema;
 
 /**
  * Интерфейс валидатора языково-независимых схем DTO.

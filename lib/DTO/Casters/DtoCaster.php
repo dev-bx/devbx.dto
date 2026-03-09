@@ -1,8 +1,8 @@
 <?php
 
-namespace Local\Lib\DTO\Casters;
+namespace DevBX\DTO\Casters;
 
-use Local\Lib\DTO\BaseDTO;
+use DevBX\DTO\BaseDTO;
 use ReflectionNamedType;
 use ReflectionProperty;
 

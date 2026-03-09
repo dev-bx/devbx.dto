@@ -1,6 +1,6 @@
 <?php
 
-namespace Local\Lib\DTO\Casters;
+namespace DevBX\DTO\Casters;
 
 use ReflectionNamedType;
 use ReflectionProperty;
