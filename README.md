@@ -1,39 +1,50 @@
----
+# DevBX Data Transfer Objects (DTO) Library
 
-# Data Transfer Objects (DTO) Library
+Мощная, строго типизированная и независимая от фреймворков библиотека DTO для PHP 8.2+.
 
-Мощная, строго типизированная и независимая от фреймворков библиотека DTO для PHP 8.1+.
-Обеспечивает безопасную передачу данных между слоями приложения с поддержкой иммутабельности, декларативной валидации, маскирования данных и авто-кастинга типов.
+Обеспечивает безопасную передачу данных между слоями приложения с поддержкой иммутабельности, декларативной валидации, маскирования данных, авто-кастинга типов и удобного маппинга HTTP-запросов.
 
-## 🚀 Ключевые возможности
+## 🚀 Установка
 
-* **100% Строгая типизация:** Поддержка вложенных DTO, коллекций, `Enums` и `DateTime`.
-* **Иммутабельность:** Полная поддержка `readonly` свойств через Constructor Property Promotion.
-* **Безопасность (Security):** Исключение или маскирование чувствительных данных (паролей, токенов) при экспорте.
+Установите пакет с помощью Composer:
+
+```bash
+composer require devbx/dto
+
+```
+
+## ✨ Ключевые возможности
+
+* **100% Строгая типизация:** Автоматическое приведение вложенных DTO, коллекций, `Enums`, скалярных типов и `DateTime`.
+* **Иммутабельность:** Полная поддержка `readonly` свойств и Constructor Property Promotion.
+* **Contextual HTTP Mapping:** Роутинг данных из `Query` (GET) и `Body` (POST/JSON) прямиком в свойства DTO для контроллеров.
+* **Безопасность (Security):** Исключение или маскирование чувствительных данных (паролей, токенов) при экспорте "из коробки" (`#[Hidden]`, `#[Masked]`).
+* **Декларативная валидация:** Встроенные атрибуты (`#[Min]`, `#[Max]`, `#[Email]`, `#[Regex]`, `#[InArray]`) для проверки бизнес-правил.
+* **Smart Mapping & Formatting:** Явный алиасинг ключей (`#[MapFrom]`, `#[MapTo]`) и экспорт в `camelCase`, `snake_case` или `UPPER_SNAKE_CASE`.
 * **Lifecycle Hooks:** Хуки жизненного цикла (`#[PostHydrate]`, `#[PreExport]`) для нормализации данных.
-* **Декларативная валидация:** Атрибуты (например, `#[Min]`) для проверки бизнес-правил.
-* **Smart Mapping:** Явный алиасинг ключей (`#[MapFrom]`, `#[MapTo]`) и поддержка `camelCase` / `snake_case` "из коробки".
-* **Contextual Controller Mapping:** Роутинг данных из `Query` и `Body` прямиком в DTO.
-* **Strict Mode:** Защита от мусорных данных во входящих массивах.
+* **Strict Mode:** Защита от "мусорных" данных во входящих массивах (`#[Strict]`).
+* **Dev Tools:** Встроенные инструменты для генерации классов "на лету" из сырых массивов и экспорта/импорта языково-независимых JSON-схем.
 
 ---
 
 ## 📦 Быстрый старт (Quick Start)
 
-Создайте свой первый DTO, используя современные возможности PHP 8.
+Создайте свой первый DTO, используя современные возможности PHP:
 
 ```php
-use Local\Lib\DTO\BaseDTO;
-use Local\Lib\DTO\Attributes\Validation\Min;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Validation\Min;
+use DevBX\DTO\Attributes\Validation\Email;
 
 class UserDTO extends BaseDTO
 {
     public function __construct(
         public readonly int $id,
-        
-        #[Min(3)]
+
+        #[Min(3, 'Имя пользователя должно быть не короче 3 символов')]
         public readonly string $username,
-        
+
+        #[Email('Некорректный формат email')]
         public readonly ?string $email = null
     ) {}
 }
@@ -48,196 +59,244 @@ $dto = UserDTO::fromArray([
 // 2. Валидация
 $validation = $dto->validate();
 if (!$validation->isSuccess()) {
-    throw new Exception($validation->getErrors()[0]->getMessage());
+    throw new \RuntimeException($validation->getErrors()[0]->getMessage());
 }
 
 // 3. Экспорт (по умолчанию возвращает camelCase ключи, можно передать FORMAT_SNAKE)
 $array = $dto->toArray(BaseDTO::FORMAT_SNAKE);
+// Ожидаемый результат: ['id' => 1, 'username' => 'admin', 'email' => 'admin@example.com']
 
 ```
 
 ---
 
-## 📖 Подробное руководство (Features)
+## 📖 Подробное руководство
 
-### 1. Гидратация и Конструкторы (Immutability)
+### 1. HTTP Mapping для Контроллеров (Contextual Mapping)
 
-Библиотека автоматически анализирует параметры конструктора. Это позволяет создавать абсолютно неизменяемые объекты.
+Библиотека идеально подходит для обработки HTTP-запросов. Вы можете указать, откуда именно брать данные: из GET-параметров или из тела запроса.
 
 ```php
-readonly class ProductDTO extends BaseDTO
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Mapping\Query;
+use DevBX\DTO\Attributes\Mapping\Body;
+use DevBX\DTO\Http\AbstractController;
+
+class UpdateUserRequest extends BaseDTO
 {
     public function __construct(
-        public int $id,
-        public string $title
+        #[Query('user_id')]
+        public readonly int $id, // Берется строго из GET (?user_id=123)
+
+        #[Body]
+        public readonly string $email // Берется строго из тела запроса (POST/JSON)
     ) {}
 }
 
-```
-
-### 2. Приведение типов (Casting) и Вложенность
-
-Свойства автоматически приводятся к нужным типам. Библиотека "из коробки" понимает объекты `DateTime`, `Enum`, другие `BaseDTO` и Коллекции.
-
-```php
-class OrderDTO extends BaseDTO
+// Пример использования в вашем контроллере:
+class UserController extends AbstractController
 {
-    public StatusEnum $status; // Автоматически найдет нужный case в Enum
-    public DateTime $createdAt; // Распарсит строку даты
-    public UserDTO $customer;   // Рекурсивно гидратирует вложенный DTO
-    
-    #[CollectionType(ItemDTO::class)]
-    public BaseCollection $items; // Создаст коллекцию типизированных объектов
-}
-
-```
-
-### 3. Алиасинг ключей (Mapping)
-
-Если API стороннего сервиса возвращает ключи с префиксами или опечатками, используйте `#[MapFrom]` и `#[MapTo]`.
-
-```php
-use Local\Lib\DTO\Attributes\Mapping\MapFrom;
-use Local\Lib\DTO\Attributes\Mapping\MapTo;
-
-class IntegrationDTO extends BaseDTO
-{
-    #[MapFrom('@odata.count')]
-    #[MapTo('total_items')]
-    public int $count;
-    
-    #[MapFrom('X-Request-Id')]
-    public string $requestId;
-}
-
-```
-
-*Входящий массив может содержать `@odata.count`, но при вызове `$dto->toArray()` ключ станет `total_items`.*
-
-### 4. Вычисляемые свойства (Computed Properties)
-
-Для производных данных, которые должны попасть в итоговый массив/JSON (например, для фронтенда на Vue3), используйте `#[Computed]`.
-
-```php
-use Local\Lib\DTO\Attributes\Mapping\Computed;
-
-class ProfileDTO extends BaseDTO
-{
-    public string $firstName;
-    public string $lastName;
-
-    #[Computed]
-    public function getFullName(): string
+    public function update(array $queryParams, array $bodyParams)
     {
-        return "{$this->firstName} {$this->lastName}";
+        /** @var UpdateUserRequest $dto */
+        $dto = $this->resolveDto(UpdateUserRequest::class, $queryParams, $bodyParams);
+
+        // $dto->id и $dto->email корректно заполнены, конфликты ключей исключены
     }
 }
-// Результат toArray(): ['firstName' => '...', 'lastName' => '...', 'fullName' => '...']
 
 ```
 
-### 5. Безопасность и Маскирование (Security)
+### 2. Безопасность и Маскирование данных
 
-Защитите чувствительные данные от попадания в логи или клиентские ответы.
+Защитите чувствительные данные от случайного попадания в логи, ответы API или фронтенд.
 
 ```php
-use Local\Lib\DTO\Attributes\Behavior\Masked;
-use Local\Lib\DTO\Attributes\Behavior\Hidden;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Behavior\Masked;
+use DevBX\DTO\Attributes\Behavior\Hidden;
 
 class AuthResponseDTO extends BaseDTO
 {
     public string $login;
 
-    #[Masked] 
+    #[Masked]
     public string $password; // В toArray() станет '********'
 
     #[Masked('*** REDACTED ***')]
-    public string $apiKey;   // Кастомная маска
+    public string $apiToken; // Кастомная маска
 
     #[Hidden]
-    public string $internalDbId; // Вообще не попадет в toArray() и toJson()
+    public string $internalSecret; // Вообще не попадет в toArray() и jsonSerialize()
 }
 
 ```
 
-### 6. Strict Mode (Защита от мусора)
+### 3. Работа с коллекциями и вложенными DTO
 
-Включите строгий режим, чтобы DTO выбрасывал `UnmappedPropertiesException`, если во входящем массиве есть неизвестные ключи.
+Поддержка сложных структур данных "из коробки" с помощью типизированных коллекций (`BaseCollection`) и атрибута `#[Cast]`.
 
 ```php
-use Local\Lib\DTO\Attributes\Behavior\Strict;
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\BaseCollection;
+use DevBX\DTO\Attributes\Cast;
+use DevBX\DTO\Attributes\CollectionType;
+
+class TagDTO extends BaseDTO {
+    public string $name;
+}
+
+// Вариант 1: Строго типизированная коллекция
+#[CollectionType(TagDTO::class)]
+class TagCollection extends BaseCollection {}
+
+class PostDTO extends BaseDTO
+{
+    public string $title;
+
+    // Использование отдельного класса коллекции
+    public TagCollection $tags;
+
+    // Вариант 2: Использование обычного массива с кастингом в DTO
+    #[Cast(TagDTO::class)]
+    public array $categories = [];
+}
+
+```
+
+### 4. Вычисляемые свойства (Computed Properties)
+
+Нужно добавить производные данные в результирующий массив? Используйте `#[Computed]`.
+
+```php
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Mapping\Computed;
+use DevBX\DTO\Attributes\Mapping\MapTo;
+
+class ProductDTO extends BaseDTO
+{
+    public float $price;
+    public float $taxRate = 0.2;
+
+    #[Computed]
+    #[MapTo('price_with_tax')]
+    public function calculateTotal(): float
+    {
+        return $this->price * (1 + $this->taxRate);
+    }
+}
+
+```
+
+### 5. Алиасинг ключей (MapFrom / MapTo)
+
+Полезно при интеграции со сторонними API, которые возвращают ключи с опечатками или специфичными префиксами.
+
+```php
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Mapping\MapFrom;
+use DevBX\DTO\Attributes\Mapping\MapTo;
+
+class IntegrationDTO extends BaseDTO
+{
+    #[MapFrom('@odata.count')]
+    #[MapTo('totalItems')]
+    public int $count;
+}
+
+```
+
+### 6. Хуки жизненного цикла
+
+Инкапсулируйте логику нормализации данных прямо внутри DTO.
+
+```php
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Lifecycle\PostHydrate;
+use DevBX\DTO\Attributes\Lifecycle\PreExport;
+
+class SearchDTO extends BaseDTO
+{
+    public string $query;
+    public ?string $exportTime = null;
+
+    #[PostHydrate]
+    protected function normalize(): void
+    {
+        // Вызовется автоматически сразу после fromArray()
+        $this->query = mb_strtolower(trim($this->query));
+    }
+
+    #[PreExport]
+    protected function setTimestamp(): void
+    {
+        // Вызовется перед toArray()
+        $this->exportTime = date('Y-m-d H:i:s');
+    }
+}
+
+```
+
+### 7. Strict Mode (Защита от неизвестных полей)
+
+Включите строгий режим, чтобы предотвратить создание DTO, если во входящих данных присутствуют неизвестные свойства.
+
+```php
+use DevBX\DTO\BaseDTO;
+use DevBX\DTO\Attributes\Behavior\Strict;
 
 #[Strict]
 class StrictUserDTO extends BaseDTO
 {
     public string $name;
 }
-// StrictUserDTO::fromArray(['name' => 'John', 'is_admin' => true]) -> Exception!
 
-```
-
-### 7. Lifecycle Hooks (Хуки)
-
-Инкапсулируйте логику нормализации внутри DTO.
-
-```php
-use Local\Lib\DTO\Attributes\Lifecycle\PostHydrate;
-use Local\Lib\DTO\Attributes\Lifecycle\PreExport;
-
-class SearchDTO extends BaseDTO
-{
-    public string $query;
-
-    #[PostHydrate]
-    protected function normalize(): void
-    {
-        // Вызовется автоматически сразу после fromArray()
-        $this->query = strtolower(trim($this->query));
-    }
-}
-
-```
-
-### 8. Contextual HTTP Mapping
-
-Идеально для контроллеров. Маршрутизируйте данные из разных частей HTTP-запроса (GET vs POST) прямо в свойства DTO.
-
-```php
-use Local\Lib\DTO\Attributes\Mapping\Query;
-use Local\Lib\DTO\Attributes\Mapping\Body;
-
-class UpdateUserRequest extends BaseDTO
-{
-    public function __construct(
-        #[Query('user_id')]
-        public readonly int $id, // Возьмется строго из GET
-
-        #[Body]
-        public readonly string $email // Возьмется строго из POST (тела запроса)
-    ) {}
-}
-
-// В вашем контроллере, наследуемом от AbstractController:
-// $dto = $this->resolveDto(UpdateUserRequest::class, $request->query(), $request->body());
+// Выбросит UnmappedPropertiesException, так как поля 'is_admin' не существует в DTO
+StrictUserDTO::fromArray(['name' => 'John', 'is_admin' => true]);
 
 ```
 
 ---
 
-## 🛠 Экспорт схем (Dev Tools)
+## 🛠 Инструменты разработчика (Dev Tools)
 
-Библиотека содержит инструменты для генерации JSON-схем, которые можно использовать для валидации на клиенте или документирования API (Swagger/OpenAPI).
+### Генерация кода "на лету" (DTOGenerator)
+
+Устали писать DTO руками для огромных ответов от внешних API? Передайте массив данных в `DTOGenerator`, и он сам проанализирует типы, вложенности и создаст готовый PHP-код классов:
 
 ```php
-use Local\Lib\DTO\Dev\DTOGenerator;
-use Local\Lib\DTO\Schema\DTOSchemaManager;
+use DevBX\DTO\Dev\DTOGenerator;
 
-// Генерация схемы по классу DTO
-$manager = new DTOSchemaManager(new SchemaExporter(), new SchemaImporter(), new SchemaValidator());
-$manager->exportTo('path/to/schema.json', UserDTO::class);
+$apiResponse = [
+    'id' => 123,
+    'status' => 'active',
+    'items' => [
+        ['product_id' => 1, 'price' => 10.50]
+    ]
+];
+
+// Сгенерирует корневой DTO и дочерний DTO для items с расстановкой атрибутов #[Cast]
+$code = DTOGenerator::generate('OrderDTO', 'App\\DTO', $apiResponse);
+echo $code;
 
 ```
 
----
+### Импорт и экспорт JSON-схем (DTOSchemaManager)
 
-*Developed with strict architectural standards (Design-Time vs Run-Time separation, SOLID).*
+Библиотека поддерживает конвертацию DTO в языково-независимые JSON-схемы (полезно для OpenAPI/Swagger, TypeScript или межсервисного взаимодействия) и обратно в PHP-код.
+
+```php
+use DevBX\DTO\Schema\DTOSchemaManager;
+use DevBX\DTO\Schema\SchemaExporter;
+use DevBX\DTO\Schema\SchemaImporter;
+use DevBX\DTO\Schema\SchemaValidator;
+
+$manager = new DTOSchemaManager(new SchemaValidator(), new SchemaExporter(), new SchemaImporter());
+
+// 1. Экспорт PHP-класса в JSON-файл
+$manager->exportToFile(UserDTO::class, '/path/to/schema.json');
+
+// 2. Генерация PHP-кода на основе JSON-файла
+$manager->importFromFile('/path/to/schema.json', '/path/to/output/dir');
+
+```
