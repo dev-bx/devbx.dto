@@ -1,0 +1,23 @@
+{
+    "name": "devbx/dto",
+    "description": "Strict and powerful DTO library for PHP",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.2",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "DevBX\\DTO\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\DevBX\\DTO\\": "tests/"
+        }
+    }
+}
