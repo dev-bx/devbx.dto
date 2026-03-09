@@ -81,13 +81,29 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
     }
 
     /**
-     * Создает новый экземпляр элемента, соответствующего типу коллекции.
-     * * @param array $data Опциональные данные для инициализации (гидратации) DTO
+     * Добавить существующий элемент в коллекцию.
+     * Возвращает саму коллекцию для поддержки цепочек вызовов (Fluent Interface).
+     *
+     * @param BaseDTO $item
+     * @return static
+     */
+    public function add(BaseDTO $item): static
+    {
+        $this->validateType($item);
+        $this->items[] = $item;
+
+        return $this;
+    }
+
+    /**
+     * Создать новый элемент (опционально из массива), добавить его в коллекцию и вернуть созданный объект.
+     *
+     * @param array $data Опциональный массив данных для гидратации
      * @param bool $strict Строгий режим при гидратации из массива
-     * @return T
+     * @return T Возвращает созданный экземпляр элемента коллекции
      * @throws \RuntimeException Если класс элемента коллекции не определен атрибутом #[CollectionType]
      */
-    public function createItem(array $data = [], bool $strict = false): BaseDTO
+    public function create(array $data = [], bool $strict = false): BaseDTO
     {
         $className = $this->getItemClass();
 
@@ -95,21 +111,20 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
             throw new \RuntimeException(sprintf('Cannot create item: CollectionType attribute is missing in %s', static::class));
         }
 
-        if (!empty($data)) {
-            return $className::fromArray($data, $strict);
+        /** @var BaseDTO $item */
+        if (empty($data)) {
+            // Быстрая инициализация пустого объекта
+            $item = new $className();
+        } else {
+            // Гидратация через схему DTO
+            $item = $className::fromArray($data, $strict);
         }
 
-        return new $className();
-    }
+        // Используем строгий метод add для помещения в коллекцию
+        $this->add($item);
 
-    /**
-     * Добавить элемент в коллекцию.
-     */
-    public function add(BaseDTO $item): static
-    {
-        $this->validateType($item);
-        $this->items[] = $item;
-        return $this;
+        // Возвращаем именно созданный элемент
+        return $item;
     }
 
     /**
@@ -148,15 +163,19 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
             if ($item instanceof BaseDTO) {
                 // Если это уже объект DTO, пропускаем через стандартную валидацию
                 $this->add($item);
-            } elseif (is_array($item)) {
-                // Если это сырой массив, гидратируем его
+            } elseif (is_iterable($item)) {
+                // Если это сырой массив или итерируемый объект (например, ReadOnlyArrayProxy), гидратируем его
                 if ($className === null) {
                     throw new \RuntimeException(sprintf('Cannot hydrate array: CollectionType attribute is missing in %s', static::class));
                 }
-                $this->add($className::fromArray($item, $strict));
+
+                // Приводим объект (IteratorAggregate/Traversable) к нативному массиву
+                $itemArray = is_array($item) ? $item : iterator_to_array($item);
+
+                $this->add($className::fromArray($itemArray, $strict));
             } else {
                 throw new \InvalidArgumentException(
-                    sprintf('Items must be arrays or instances of BaseDTO. Got: %s', get_debug_type($item))
+                    sprintf('Items must be arrays, iterable objects, or instances of BaseDTO. Got: %s', get_debug_type($item))
                 );
             }
         }
@@ -236,6 +255,46 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
     }
 
     // --- Трансформация и Агрегация ---
+
+    /**
+     * Возвращает новую коллекцию, содержащую срез элементов.
+     * Не модифицирует текущую коллекцию.
+     *
+     * @param int $offset Смещение (если отрицательное - отсчет с конца)
+     * @param int|null $length Количество элементов (если null - до конца)
+     * @return static<T>
+     */
+    public function slice(int $offset, ?int $length = null): static
+    {
+        return new static(array_slice($this->items, $offset, $length));
+    }
+
+    /**
+     * Возвращает новую коллекцию с заданным количеством элементов.
+     * Если передано отрицательное число, берет элементы с конца коллекции.
+     *
+     * @param int $limit Количество элементов
+     * @return static<T>
+     */
+    public function take(int $limit): static
+    {
+        if ($limit < 0) {
+            return $this->slice($limit, abs($limit));
+        }
+
+        return $this->slice(0, $limit);
+    }
+
+    /**
+     * Возвращает новую коллекцию, пропустив заданное количество элементов с начала.
+     *
+     * @param int $count Количество элементов для пропуска
+     * @return static<T>
+     */
+    public function skip(int $count): static
+    {
+        return $this->slice($count);
+    }
 
     /**
      * Проверяет, пуста ли коллекция.
@@ -424,6 +483,9 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
 
     // --- Реализация интерфейсов PHP ---
 
+    /**
+     * @return \ArrayIterator<int, T>
+     */
     public function getIterator(): Traversable
     {
         return new ArrayIterator($this->items);

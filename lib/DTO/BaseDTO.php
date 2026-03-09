@@ -24,10 +24,9 @@ use ReflectionNamedType;
 use ReflectionProperty;
 use ReflectionMethod;
 use ReflectionAttribute;
-use ArrayAccess;
 use JsonSerializable;
 
-abstract class BaseDTO implements ArrayAccess, JsonSerializable
+abstract class BaseDTO implements JsonSerializable
 {
     public const FORMAT_CAMEL = 'camel';
     public const FORMAT_SNAKE = 'snake';
@@ -428,26 +427,6 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
     public function jsonSerialize(): mixed
     {
         return $this->toArray(self::FORMAT_CAMEL);
-    }
-
-    public function offsetExists($offset): bool
-    {
-        return property_exists($this, $offset) && isset($this->{$offset});
-    }
-
-    public function offsetGet($offset): mixed
-    {
-        return $this->{$offset} ?? null;
-    }
-
-    public function offsetSet($offset, $value): void
-    {
-        if (property_exists($this, $offset)) $this->{$offset} = $value;
-    }
-
-    public function offsetUnset($offset): void
-    {
-        if (property_exists($this, $offset)) unset($this->{$offset});
     }
 
     public function only(string ...$keys): array
