@@ -13,6 +13,7 @@ use Local\Lib\DTO\Attributes\Lifecycle\PreExport;
 use Local\Lib\DTO\Attributes\Behavior\Strict;
 use Local\Lib\DTO\Attributes\Behavior\Hidden;
 use Local\Lib\DTO\Attributes\Behavior\Masked;
+use Local\Lib\DTO\Attributes\Behavior\Initialize;
 use Local\Lib\DTO\Exceptions\UnmappedPropertiesException;
 use Local\Lib\DTO\Validation\ValidationResult;
 use Local\Lib\DTO\Validation\ValidationError;
@@ -42,7 +43,9 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
             $prop = $propConfig['reflector'];
             if (!empty($propConfig['typeData'])) {
                 $t = $propConfig['typeData'][0];
-                if (!$t['isBuiltin'] && is_subclass_of($t['name'], BaseCollection::class)) {
+
+                // Инициализируем если это коллекция ИЛИ есть атрибут #[Initialize]
+                if (!$t['isBuiltin'] && (is_subclass_of($t['name'], BaseCollection::class) || $propConfig['isAutoInit'])) {
                     if (!$prop->isInitialized($this)) {
                         $this->{$propName} = new $t['name']();
                     }
@@ -91,6 +94,7 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
             $mapFromAttr = $prop->getAttributes(MapFrom::class);
             $mapToAttr = $prop->getAttributes(MapTo::class);
             $maskedAttr = $prop->getAttributes(Masked::class);
+            $initAttr = $prop->getAttributes(Initialize::class); // Поиск нового атрибута
 
             $mapFromKey = !empty($mapFromAttr) ? $mapFromAttr[0]->newInstance()->key : null;
             $mapToKey = !empty($mapToAttr) ? $mapToAttr[0]->newInstance()->key : null;
@@ -107,7 +111,7 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
             }
 
             $validators = [];
-            foreach ($prop->getAttributes(ValidationRuleInterface::class, ReflectionAttribute::IS_INSTANCEOF) as $attr) {
+            foreach ($prop->getAttributes(ValidationRuleInterface::class, \ReflectionAttribute::IS_INSTANCEOF) as $attr) {
                 $validators[] = $attr->newInstance();
             }
 
@@ -124,6 +128,7 @@ abstract class BaseDTO implements ArrayAccess, JsonSerializable
                 ],
                 'isHidden' => !empty($prop->getAttributes(Hidden::class)),
                 'mask' => !empty($maskedAttr) ? $maskedAttr[0]->newInstance()->mask : null,
+                'isAutoInit' => !empty($initAttr), // Сохраняем флаг инициализации
                 'validators' => $validators
             ];
         }

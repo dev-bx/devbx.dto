@@ -16,6 +16,8 @@ use Local\Lib\DTO\Attributes\CollectionType;
  * Обеспечивает строгую типизацию и методы поиска/фильтрации.
  *
  * @template T of BaseDTO
+ * @implements IteratorAggregate<int, T>
+ * @implements ArrayAccess<int, T>
  */
 class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonSerializable
 {
@@ -79,12 +81,86 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
     }
 
     /**
+     * Создает новый экземпляр элемента, соответствующего типу коллекции.
+     * * @param array $data Опциональные данные для инициализации (гидратации) DTO
+     * @param bool $strict Строгий режим при гидратации из массива
+     * @return T
+     * @throws \RuntimeException Если класс элемента коллекции не определен атрибутом #[CollectionType]
+     */
+    public function createItem(array $data = [], bool $strict = false): BaseDTO
+    {
+        $className = $this->getItemClass();
+
+        if ($className === null) {
+            throw new \RuntimeException(sprintf('Cannot create item: CollectionType attribute is missing in %s', static::class));
+        }
+
+        if (!empty($data)) {
+            return $className::fromArray($data, $strict);
+        }
+
+        return new $className();
+    }
+
+    /**
      * Добавить элемент в коллекцию.
      */
     public function add(BaseDTO $item): static
     {
         $this->validateType($item);
         $this->items[] = $item;
+        return $this;
+    }
+
+    /**
+     * Создает DTO из переданного массива и добавляет его в коллекцию.
+     * * @param array $data Массив данных для гидратации DTO
+     * @param bool $strict Строгий режим маппинга свойств
+     * @return static
+     * @throws \RuntimeException Если класс элемента коллекции не определен атрибутом #[CollectionType]
+     */
+    public function addFromArray(array $data, bool $strict = false): static
+    {
+        $className = $this->getItemClass();
+
+        if ($className === null) {
+            throw new \RuntimeException(sprintf('Cannot hydrate array: CollectionType attribute is missing in %s', static::class));
+        }
+
+        $this->add($className::fromArray($data, $strict));
+
+        return $this;
+    }
+
+    /**
+     * Массовое добавление элементов (поддерживает как готовые DTO, так и сырые массивы).
+     * * @param iterable $items Массив массивов или объектов DTO
+     * @param bool $strict Строгий режим маппинга для массивов
+     * @return static
+     * @throws \InvalidArgumentException Если элемент не является массивом или DTO
+     * @throws \RuntimeException Если передан массив, но тип коллекции не задан
+     */
+    public function addMany(iterable $items, bool $strict = false): static
+    {
+        $className = $this->getItemClass();
+
+        foreach ($items as $item) {
+            if ($item instanceof BaseDTO) {
+                // Если это уже объект DTO, пропускаем через стандартную валидацию
+                $this->add($item);
+            } elseif (is_array($item)) {
+                // Если это сырой массив, гидратируем его
+                if ($className === null) {
+                    throw new \RuntimeException(sprintf('Cannot hydrate array: CollectionType attribute is missing in %s', static::class));
+                }
+                $this->add($className::fromArray($item, $strict));
+            } else {
+                throw new \InvalidArgumentException(
+                    sprintf('Items must be arrays or instances of BaseDTO. Got: %s', get_debug_type($item))
+                );
+            }
+        }
+
         return $this;
     }
 
@@ -306,16 +382,32 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
     public function sortBy(string $property, bool $descending = false): static
     {
         $items = $this->items;
-        
+
         usort($items, function ($a, $b) use ($property, $descending) {
             $valA = $a->{$property} ?? null;
             $valB = $b->{$property} ?? null;
 
             if ($valA == $valB) return 0;
-            
+
             $result = ($valA < $valB) ? -1 : 1;
             return $descending ? -$result : $result;
         });
+
+        return new static($items);
+    }
+
+    /**
+     * Сортировка коллекции с использованием пользовательской callback-функции.
+     * Возвращает новую отсортированную коллекцию.
+     *
+     * @param callable(T, T): int $callback Функция сравнения (должна возвращать целое число < 0, 0 или > 0)
+     * @return static
+     */
+    public function sort(callable $callback): static
+    {
+        $items = $this->items;
+
+        usort($items, $callback);
 
         return new static($items);
     }
