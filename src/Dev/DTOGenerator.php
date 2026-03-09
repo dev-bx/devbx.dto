@@ -305,7 +305,10 @@ class DTOGenerator
         return $results;
     }
 
-    public static function generateDocsForDirectory(string $directory)
+    /**
+     * @return array<class-string, string>
+     */
+    public static function generateDocsForDirectory(string $directory): array
     {
         $results = [];
 

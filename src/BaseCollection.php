@@ -18,6 +18,7 @@ use DevBX\DTO\Attributes\CollectionType;
  * @template T of BaseDTO
  * @implements IteratorAggregate<int, T>
  * @implements ArrayAccess<int, T>
+ * @phpstan-consistent-constructor
  */
 class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonSerializable
 {
@@ -111,7 +112,6 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
             throw new \RuntimeException(sprintf('Cannot create item: CollectionType attribute is missing in %s', static::class));
         }
 
-        /** @var BaseDTO $item */
         if (empty($data)) {
             // Быстрая инициализация пустого объекта
             $item = new $className();
@@ -187,7 +187,7 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
 
     /**
      * Найти первый элемент, удовлетворяющий условию.
-     * @param callable(T): bool $callback
+     * @param callable(T, int|string): bool $callback
      * @return T|null
      */
     public function find(callable $callback): ?BaseDTO
@@ -203,7 +203,7 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
     /**
      * Найти все элементы, удовлетворяющие условию.
      * Возвращает НОВУЮ коллекцию.
-     * @param callable(T): bool $callback
+     * @param callable(T, int|string): bool $callback
      * @return static
      */
     public function filter(callable $callback): static

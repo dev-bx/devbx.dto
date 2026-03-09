@@ -26,6 +26,9 @@ use ReflectionMethod;
 use ReflectionAttribute;
 use JsonSerializable;
 
+/**
+ * @phpstan-consistent-constructor
+ */
 abstract class BaseDTO implements JsonSerializable
 {
     public const FORMAT_CAMEL = 'camel';
@@ -56,6 +59,10 @@ abstract class BaseDTO implements JsonSerializable
     private static function getClassSchema(string $className): array
     {
         if (isset(self::$schemaCache[$className])) return self::$schemaCache[$className];
+
+        if (!is_string($className) || !class_exists($className)) {
+            throw new \InvalidArgumentException("Invalid class name: " . (string)$className);
+        }
 
         $reflection = new ReflectionClass($className);
         $schema = [
@@ -320,6 +327,12 @@ abstract class BaseDTO implements JsonSerializable
         return $result;
     }
 
+    /**
+     * Создает коллекцию DTO из массива данных.
+     *
+     * @param iterable<mixed> $list
+     * @return BaseCollection<static>
+     */
     public static function fromCollection(iterable $list, bool $strict = false): BaseCollection
     {
         $items = [];
