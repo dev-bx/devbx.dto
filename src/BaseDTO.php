@@ -60,7 +60,7 @@ abstract class BaseDTO implements JsonSerializable
     {
         if (isset(self::$schemaCache[$className])) return self::$schemaCache[$className];
 
-        if (!is_string($className) || !class_exists($className)) {
+        if (!class_exists($className)) {
             throw new \InvalidArgumentException("Invalid class name: " . (string)$className);
         }
 
@@ -112,7 +112,9 @@ abstract class BaseDTO implements JsonSerializable
                 $typeData[] = ['name' => $type->getName(), 'isBuiltin' => $type->isBuiltin(), 'namedType' => $type];
             } elseif ($type instanceof \ReflectionUnionType) {
                 foreach ($type->getTypes() as $t) {
-                    $typeData[] = ['name' => $t->getName(), 'isBuiltin' => $t->isBuiltin(), 'namedType' => $t];
+                    if ($t instanceof ReflectionNamedType) {
+                        $typeData[] = ['name' => $t->getName(), 'isBuiltin' => $t->isBuiltin(), 'namedType' => $t];
+                    }
                 }
             }
 

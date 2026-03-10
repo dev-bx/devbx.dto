@@ -240,7 +240,9 @@ class SchemaExporter implements SchemaExporterInterface
             $isNullable = $reflectionType->allowsNull();
         } elseif ($reflectionType instanceof ReflectionUnionType) {
             foreach ($reflectionType->getTypes() as $t) {
-                $types[] = $processNamedType($t);
+                if ($t instanceof ReflectionNamedType) {
+                    $types[] = $processNamedType($t);
+                }
                 if ($t->allowsNull()) {
                     $isNullable = true;
                 }

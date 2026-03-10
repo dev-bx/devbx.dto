@@ -26,6 +26,10 @@ class DTOSchemaManager
      */
     public function exportToFile(string $className, string $filePath): bool
     {
+        if (!class_exists($className)) {
+            throw new \InvalidArgumentException("Class {$className} does not exist.");
+        }
+
         // 1. Извлекаем данные схемы через Reflection
         $schemaData = $this->exporter->export($className);
 
@@ -60,6 +64,10 @@ class DTOSchemaManager
 
         // 1. Читаем и декодируем JSON
         $json = file_get_contents($filePath);
+        if ($json === false) {
+            throw new RuntimeException("Failed to read schema file: {$filePath}");
+        }
+
         $schemaData = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
 
         // 2. Строгая валидация структуры схемы

@@ -447,7 +447,9 @@ class DTOGenerator
             $isNullable = $type->allowsNull();
         } elseif ($type instanceof ReflectionUnionType) {
             foreach ($type->getTypes() as $t) {
-                $allTypes = array_merge($allTypes, $getTypes($t));
+                if ($t instanceof ReflectionNamedType) {
+                    $allTypes = array_merge($allTypes, $getTypes($t));
+                }
                 if ($t->allowsNull()) {
                     $isNullable = true;
                 }

@@ -1,0 +1,20 @@
+parameters:
+    level: 7
+
+    paths:
+        - src
+    
+    # Отключаем предупреждения о неиспользованных правилах
+    reportUnmatchedIgnoredErrors: false
+
+    ignoreErrors:
+        # Игнорируем отсутствие классов 1С-Битрикс в standalone среде
+        - '#Class Bitrix\\Main\\Type\\(Date|DateTime) not found\.#'
+        - '#Call to an undefined static method Bitrix\\Main\\Type\\Date::createFromPhp\(\)\.#'
+
+        # Игнорируем излишнюю осторожность PHPStan с проверкой на сабклассы в AbstractController
+        - '#Call to function is_subclass_of\(\) .* will always evaluate to true\.#'
+
+        # Отключаем паранойю 6 уровня по поводу точного описания каждого сырого массива
+        - 
+            identifier: missingType.iterableValue

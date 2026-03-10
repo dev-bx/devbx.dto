@@ -37,7 +37,10 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
         foreach ($items as $item) {
             $this->validateType($item);
         }
-        $this->items = array_values($items);
+
+        /** @var array<int, T> $values */
+        $values = array_values($items);
+        $this->items = $values;
     }
 
     /**
@@ -91,6 +94,7 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
     public function add(BaseDTO $item): static
     {
         $this->validateType($item);
+        /** @var T $item */
         $this->items[] = $item;
 
         return $this;
@@ -507,6 +511,7 @@ class BaseCollection implements ArrayAccess, Countable, IteratorAggregate, JsonS
             $this->add($value);
         } else {
             $this->validateType($value);
+            /** @var T $value */
             $this->items[$offset] = $value;
         }
     }

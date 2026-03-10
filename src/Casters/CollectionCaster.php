@@ -32,6 +32,7 @@ class CollectionCaster implements CasterInterface
             if (!empty($attributes)) {
                 $targetClass = $attributes[0]->newInstance()->className;
             } else {
+                /** @var class-string $typeName */
                 $collectionReflection = new ReflectionClass($typeName);
                 $collectionAttributes = $collectionReflection->getAttributes(CollectionType::class);
                 if (!empty($collectionAttributes)) {
