@@ -61,6 +61,9 @@ class DTOSchemaManagerTest extends TestCase
         $this->assertFileExists($outFile);
 
         $json = file_get_contents($outFile);
+        if ($json === false) {
+            throw new \RuntimeException('Failed to read export_test.json: ' . (error_get_last()['message'] ?? 'Unknown error'));
+        }
         $data = json_decode($json, true);
 
         $this->assertSame('ExportTestDTO', $data['name']);
@@ -84,6 +87,9 @@ class DTOSchemaManagerTest extends TestCase
         $this->assertFileExists($expectedPhpFile);
 
         $phpCode = file_get_contents($expectedPhpFile);
+        if ($phpCode === false) {
+            throw new \RuntimeException('Failed to read generateduserdto.php: ' . (error_get_last()['message'] ?? 'Unknown error'));
+        }
 
         // Проверка генерации кода (без предсказаний, строго 1 в 1)
         $this->assertStringContainsString('namespace Tests\DevBX\DTO\Generated\Models;', $phpCode);
@@ -103,10 +109,12 @@ class DTOSchemaManagerTest extends TestCase
     public function testValidatorRejectsInvalidSchema(): void
     {
         $invalidJsonPath = $this->tempDir . '/invalid.json';
-        file_put_contents($invalidJsonPath, json_encode([
-            "name" => "BadDTO",
-            "properties" => []
-        ]));
+        if (file_put_contents($invalidJsonPath, json_encode([
+                "name" => "BadDTO",
+                "properties" => []
+            ])) === false) {
+            throw new \RuntimeException('Failed to write invalid.json: ' . (error_get_last()['message'] ?? 'Unknown error'));
+        }
 
         $this->expectException(\InvalidArgumentException::class);
         // Сообщение должно совпадать с тем, что выводит SchemaValidator

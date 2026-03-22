@@ -1109,15 +1109,21 @@ class BaseDTOTest extends TestCase
         try {
             // 1. Файл без PHPDoc (Должен быть модифицирован)
             $fileNoDoc = $tempDir . DIRECTORY_SEPARATOR . 'NoDocDTO.php';
-            file_put_contents($fileNoDoc, "<?php\nnamespace Tests\\TempDocs;\nuse DevBX\\DTO\\BaseDTO;\nclass NoDocDTO extends BaseDTO {\n    public int \$id;\n}\n");
+            if (file_put_contents($fileNoDoc, "<?php\nnamespace Tests\\TempDocs;\nuse DevBX\\DTO\\BaseDTO;\nclass NoDocDTO extends BaseDTO {\n    public int \$id;\n}\n") === false) {
+                throw new \RuntimeException('Failed to write NoDocDTO.php: ' . (error_get_last()['message'] ?? 'Unknown error'));
+            }
 
             // 2. Файл с ручным PHPDoc без клейма (Должен быть пропущен)
             $fileManualDoc = $tempDir . DIRECTORY_SEPARATOR . 'ManualDocDTO.php';
-            file_put_contents($fileManualDoc, "<?php\nnamespace Tests\\TempDocs;\nuse DevBX\\DTO\\BaseDTO;\n/**\n * Custom doc\n */\nclass ManualDocDTO extends BaseDTO {\n    public string \$name;\n}\n");
+            if (file_put_contents($fileManualDoc, "<?php\nnamespace Tests\\TempDocs;\nuse DevBX\\DTO\\BaseDTO;\n/**\n * Custom doc\n */\nclass ManualDocDTO extends BaseDTO {\n    public string \$name;\n}\n") === false) {
+                throw new \RuntimeException('Failed to write ManualDocDTO.php: ' . (error_get_last()['message'] ?? 'Unknown error'));
+            }
 
             // 3. Файл с невалидной структурой - не наследует BaseDTO (Должен быть пропущен)
             $fileInvalid = $tempDir . DIRECTORY_SEPARATOR . 'InvalidClass.php';
-            file_put_contents($fileInvalid, "<?php\nnamespace Tests\\TempDocs;\nclass InvalidClass {\n    public int \$id;\n}\n");
+            if (file_put_contents($fileInvalid, "<?php\nnamespace Tests\\TempDocs;\nclass InvalidClass {\n    public int \$id;\n}\n") === false) {
+                throw new \RuntimeException('Failed to write InvalidClass.php: ' . (error_get_last()['message'] ?? 'Unknown error'));
+            }
 
             // --- ПЕРВЫЙ ЗАПУСК ---
             $report = DTOGenerator::updateDocsInDirectory($tempDir);
@@ -1136,6 +1142,10 @@ class BaseDTOTest extends TestCase
 
             // Проверяем, что клеймо и методы действительно были добавлены
             $contentNoDoc = file_get_contents($fileNoDoc);
+            if ($contentNoDoc === false) {
+                throw new \RuntimeException('Failed to read NoDocDTO.php: ' . (error_get_last()['message'] ?? 'Unknown error'));
+            }
+
             $this->assertStringContainsString(DTOGenerator::DOC_WATERMARK, $contentNoDoc, 'Клеймо должно быть добавлено в файл');
             $this->assertStringContainsString('@method int getId()', $contentNoDoc, 'PHPDoc метод должен быть сгенерирован');
 
@@ -1162,4 +1172,5 @@ class BaseDTOTest extends TestCase
             }
         }
     }
+
 }

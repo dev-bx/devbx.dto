@@ -43,7 +43,9 @@ class DTOSchemaManager
         $result = file_put_contents($filePath, $json);
 
         if ($result === false) {
-            throw new RuntimeException("Failed to write schema to {$filePath}");
+            $error = error_get_last();
+            $errorMessage = $error['message'] ?? 'Unknown error';
+            throw new RuntimeException("Failed to write schema to {$filePath}. Reason: {$errorMessage}");
         }
 
         return true;
@@ -65,7 +67,9 @@ class DTOSchemaManager
         // 1. Читаем и декодируем JSON
         $json = file_get_contents($filePath);
         if ($json === false) {
-            throw new RuntimeException("Failed to read schema file: {$filePath}");
+            $error = error_get_last();
+            $errorMessage = $error['message'] ?? 'Unknown error';
+            throw new RuntimeException("Failed to read schema file: {$filePath}. Reason: {$errorMessage}");
         }
 
         $schemaData = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
@@ -92,7 +96,9 @@ class DTOSchemaManager
         $result = file_put_contents($outPath, $phpCode);
 
         if ($result === false) {
-            throw new RuntimeException("Failed to write PHP class to {$outPath}");
+            $error = error_get_last();
+            $errorMessage = $error['message'] ?? 'Unknown error';
+            throw new RuntimeException("Failed to write PHP class to {$outPath}. Reason: {$errorMessage}");
         }
 
         return true;

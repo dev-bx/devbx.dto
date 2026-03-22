@@ -506,6 +506,7 @@ class DTOGenerator
      *
      * @param string $filePath
      * @param array{modified: string[], unmodified: string[], skipped_manual: string[], skipped_invalid: string[]} &$report
+     * @throws \RuntimeException Если не удалось записать изменения в файл
      */
     private static function processFileForDocsUpdate(string $filePath, array &$report): void
     {
@@ -623,7 +624,14 @@ class DTOGenerator
             $pos = strpos($content, $docContent);
             if ($pos !== false) {
                 $content = substr_replace($content, $newDoc, $pos, strlen($docContent));
-                file_put_contents($filePath, $content);
+
+                $writeResult = file_put_contents($filePath, $content);
+                if ($writeResult === false) {
+                    $error = error_get_last();
+                    $errorMessage = $error['message'] ?? 'Unknown error';
+                    throw new \RuntimeException(sprintf('Failed to write updated PHPDoc to "%s". Reason: %s', $filePath, $errorMessage));
+                }
+
                 $report['modified'][] = $filePath;
             }
         } else {
@@ -650,7 +658,14 @@ class DTOGenerator
 
             // Вставляем сгенерированный блок
             array_splice($lines, $injectLine, 0, $newDoc);
-            file_put_contents($filePath, implode("\n", $lines));
+
+            $writeResult = file_put_contents($filePath, implode("\n", $lines));
+            if ($writeResult === false) {
+                $error = error_get_last();
+                $errorMessage = $error['message'] ?? 'Unknown error';
+                throw new \RuntimeException(sprintf('Failed to write new PHPDoc to "%s". Reason: %s', $filePath, $errorMessage));
+            }
+
             $report['modified'][] = $filePath;
         }
     }
