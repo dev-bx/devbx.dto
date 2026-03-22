@@ -1090,4 +1090,76 @@ class BaseDTOTest extends TestCase
         $this->assertStringContainsString('@method \Tests\DevBX\DTO\TestUserDTO setId(int $value)', $annotations);
     }
 
+    /**
+     * Тест автоматического рекурсивного обновления PHPDoc в директории.
+     * (Gap Analysis: DTOGenerator auto-updater features)
+     */
+    public function testUpdateDocsInDirectory(): void
+    {
+        if (!class_exists(DTOGenerator::class)) {
+            $this->markTestSkipped('DTOGenerator class not found');
+        }
+
+        // Создаем временную директорию с использованием системного разделителя
+        $tempDir = __DIR__ . DIRECTORY_SEPARATOR . 'temp_docs_generator_test';
+        if (!is_dir($tempDir)) {
+            mkdir($tempDir, 0777, true);
+        }
+
+        try {
+            // 1. Файл без PHPDoc (Должен быть модифицирован)
+            $fileNoDoc = $tempDir . DIRECTORY_SEPARATOR . 'NoDocDTO.php';
+            file_put_contents($fileNoDoc, "<?php\nnamespace Tests\\TempDocs;\nuse DevBX\\DTO\\BaseDTO;\nclass NoDocDTO extends BaseDTO {\n    public int \$id;\n}\n");
+
+            // 2. Файл с ручным PHPDoc без клейма (Должен быть пропущен)
+            $fileManualDoc = $tempDir . DIRECTORY_SEPARATOR . 'ManualDocDTO.php';
+            file_put_contents($fileManualDoc, "<?php\nnamespace Tests\\TempDocs;\nuse DevBX\\DTO\\BaseDTO;\n/**\n * Custom doc\n */\nclass ManualDocDTO extends BaseDTO {\n    public string \$name;\n}\n");
+
+            // 3. Файл с невалидной структурой - не наследует BaseDTO (Должен быть пропущен)
+            $fileInvalid = $tempDir . DIRECTORY_SEPARATOR . 'InvalidClass.php';
+            file_put_contents($fileInvalid, "<?php\nnamespace Tests\\TempDocs;\nclass InvalidClass {\n    public int \$id;\n}\n");
+
+            // --- ПЕРВЫЙ ЗАПУСК ---
+            $report = DTOGenerator::updateDocsInDirectory($tempDir);
+
+            // Проверяем структуру отчета
+            $this->assertIsArray($report);
+            $this->assertArrayHasKey('modified', $report);
+            $this->assertArrayHasKey('unmodified', $report);
+            $this->assertArrayHasKey('skipped_manual', $report);
+            $this->assertArrayHasKey('skipped_invalid', $report);
+
+            // Проверяем распределение файлов по статусам
+            $this->assertContains($fileNoDoc, $report['modified'], 'Файл без доков должен быть модифицирован');
+            $this->assertContains($fileManualDoc, $report['skipped_manual'], 'Файл с ручными доками должен быть пропущен (защита кода)');
+            $this->assertContains($fileInvalid, $report['skipped_invalid'], 'Класс без наследования BaseDTO должен быть пропущен');
+
+            // Проверяем, что клеймо и методы действительно были добавлены
+            $contentNoDoc = file_get_contents($fileNoDoc);
+            $this->assertStringContainsString(DTOGenerator::DOC_WATERMARK, $contentNoDoc, 'Клеймо должно быть добавлено в файл');
+            $this->assertStringContainsString('@method int getId()', $contentNoDoc, 'PHPDoc метод должен быть сгенерирован');
+
+            // --- ВТОРОЙ ЗАПУСК (Проверка на Unmodified) ---
+            $reportSecondRun = DTOGenerator::updateDocsInDirectory($tempDir);
+
+            // Теперь NoDocDTO уже имеет сгенерированный PHPDoc с клеймом, идентичный новому.
+            // Следовательно, файл не должен перезаписываться.
+            $this->assertContains($fileNoDoc, $reportSecondRun['unmodified'], 'При повторном запуске файл должен быть распознан как unmodified');
+            $this->assertNotContains($fileNoDoc, $reportSecondRun['modified']);
+
+        } finally {
+            // Гарантированная очистка временных файлов после прохождения/падения теста
+            $files = glob($tempDir . DIRECTORY_SEPARATOR . '*');
+            if (is_array($files)) {
+                foreach ($files as $file) {
+                    if (is_file($file)) {
+                        unlink($file);
+                    }
+                }
+            }
+            if (is_dir($tempDir)) {
+                rmdir($tempDir);
+            }
+        }
+    }
 }

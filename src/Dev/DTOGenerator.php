@@ -17,6 +17,9 @@ use ReflectionUnionType;
  */
 class DTOGenerator
 {
+    public const BASE_NAMESPACE = 'DevBX\DTO';
+    public const DOC_WATERMARK = '@auto-generated-dto';
+
     /** Внутренний кэш для хранения объединенной структуры всех вложенных классов */
     private static array $schemas = [];
 
@@ -330,7 +333,7 @@ class DTOGenerator
 
         foreach (array_diff($classesAfter, $classesBefore) as $className)
         {
-            if (str_starts_with($className, 'Local\\Lib\\DTO\\'))
+            if (str_starts_with($className, self::BASE_NAMESPACE . '\\'))
                 continue;
 
             $results[$className] = self::generateDocsForClass($className);
@@ -385,7 +388,7 @@ class DTOGenerator
 
             // Генерируем аннотации для IDE, если тип найден
             if ($itemType !== 'mixed') {
-                $lines[] = " * @extends \\Local\\Lib\\DTO\\BaseCollection<{$itemType}>";
+                $lines[] = " * @extends \\" . self::BASE_NAMESPACE . "\\BaseCollection<{$itemType}>";
             }
         }
 
@@ -464,5 +467,191 @@ class DTOGenerator
         }
 
         return implode('|', $uniqueTypes) ?: 'mixed';
+    }
+
+    /**
+     * Рекурсивно обходит директорию, находит DTO-классы и обновляет их PHPDoc.
+     * Возвращает отчет о результатах обработки.
+     *
+     * @param string $directory Путь к директории
+     * @return array{modified: string[], unmodified: string[], skipped_manual: string[], skipped_invalid: string[]}
+     */
+    public static function updateDocsInDirectory(string $directory): array
+    {
+        $report = [
+            'modified' => [],
+            'unmodified' => [],
+            'skipped_manual' => [],
+            'skipped_invalid' => []
+        ];
+
+        if (!is_dir($directory)) {
+            return $report;
+        }
+
+        $dirIterator = new \RecursiveDirectoryIterator($directory, \RecursiveDirectoryIterator::SKIP_DOTS);
+        $iterator = new \RecursiveIteratorIterator($dirIterator);
+
+        foreach ($iterator as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
+                self::processFileForDocsUpdate($file->getPathname(), $report);
+            }
+        }
+
+        return $report;
+    }
+
+    /**
+     * Внутренний обработчик конкретного файла для обновления PHPDoc.
+     *
+     * @param string $filePath
+     * @param array{modified: string[], unmodified: string[], skipped_manual: string[], skipped_invalid: string[]} &$report
+     */
+    private static function processFileForDocsUpdate(string $filePath, array &$report): void
+    {
+        $content = file_get_contents($filePath);
+
+        if ($content === false) {
+            $report['skipped_invalid'][] = $filePath;
+            return;
+        }
+
+        $tokens = token_get_all($content);
+
+        $classCount = 0;
+        $className = '';
+        $namespace = '';
+        $classTokenIndex = -1;
+        $tempNamespace = '';
+
+        // Шаг 1: Лексический анализ для поиска namespace и class
+        foreach ($tokens as $index => $token) {
+            if (is_array($token)) {
+                if ($token[0] === T_NAMESPACE) {
+                    $i = $index + 1;
+                    while (isset($tokens[$i]) && $tokens[$i] !== ';') {
+                        if (is_array($tokens[$i]) && in_array($tokens[$i][0], [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED])) {
+                            $tempNamespace .= $tokens[$i][1];
+                        }
+                        $i++;
+                    }
+                    $namespace = $tempNamespace;
+                }
+
+                if ($token[0] === T_CLASS) {
+                    // Игнорируем резолверы ::class
+                    if ($index > 0 && is_array($tokens[$index - 1]) && $tokens[$index - 1][0] === T_DOUBLE_COLON) {
+                        continue;
+                    }
+                    $classCount++;
+                    $classTokenIndex = $index;
+
+                    $i = $index + 1;
+                    while (isset($tokens[$i])) {
+                        if (is_array($tokens[$i]) && $tokens[$i][0] === T_STRING) {
+                            $className = $tokens[$i][1];
+                            break;
+                        }
+                        $i++;
+                    }
+                }
+            }
+        }
+
+        // Если классов нет или больше 1 — пропускаем
+        if ($classCount !== 1 || $className === '') {
+            $report['skipped_invalid'][] = $filePath;
+            return;
+        }
+
+        $fqcn = $namespace ? $namespace . '\\' . $className : $className;
+
+        // Загружаем файл для работы Reflection
+        require_once $filePath;
+
+        if (!class_exists($fqcn) || !is_subclass_of($fqcn, \DevBX\DTO\BaseDTO::class)) {
+            $report['skipped_invalid'][] = $filePath;
+            return;
+        }
+
+        // Шаг 2: Генерация нового PHPDoc и инъекция клейма
+        $newDoc = self::generateDocsForClass($fqcn);
+        /** @var string $newDoc */
+        $newDoc = preg_replace('/(\n\s*\*\/)$/', "\n * " . self::DOC_WATERMARK . "$1", $newDoc);
+
+        // Шаг 3: Поиск существующего PHPDoc перед классом
+        $docTokenIndex = -1;
+        $docContent = '';
+
+        for ($i = $classTokenIndex - 1; $i >= 0; $i--) {
+            if (is_string($tokens[$i])) continue;
+            if ($tokens[$i][0] === T_WHITESPACE) continue;
+
+            // Игнорируем атрибуты PHP 8 (T_ATTRIBUTE)
+            if (defined('T_ATTRIBUTE') && $tokens[$i][0] === T_ATTRIBUTE) continue;
+
+            if ($tokens[$i][0] === T_DOC_COMMENT) {
+                $docTokenIndex = $i;
+                $docContent = $tokens[$i][1];
+                break;
+            }
+
+            // Если наткнулись на другой код (константы, свойства, функции) - прерываем поиск
+            if (in_array($tokens[$i][0], [T_FUNCTION, T_VARIABLE, T_CONST])) {
+                break;
+            }
+        }
+
+        // Шаг 4: Принятие решений и модификация
+        if ($docTokenIndex !== -1) {
+            // PHPDoc существует
+            if (!str_contains($docContent, self::DOC_WATERMARK)) {
+                $report['skipped_manual'][] = $filePath;
+                return;
+            }
+
+            // Нормализация переносов строк для точного сравнения
+            $normalizedOldDoc = str_replace("\r\n", "\n", $docContent);
+            $normalizedNewDoc = str_replace("\r\n", "\n", $newDoc);
+
+            if (trim($normalizedOldDoc) === trim($normalizedNewDoc)) {
+                $report['unmodified'][] = $filePath;
+                return;
+            }
+
+            // Замена строго найденного блока (только первого вхождения для безопасности)
+            $pos = strpos($content, $docContent);
+            if ($pos !== false) {
+                $content = substr_replace($content, $newDoc, $pos, strlen($docContent));
+                file_put_contents($filePath, $content);
+                $report['modified'][] = $filePath;
+            }
+        } else {
+            // PHPDoc не существует, внедряем его
+            $lines = explode("\n", str_replace("\r\n", "\n", $content));
+            $classToken = $tokens[$classTokenIndex];
+
+            // Защита типов для PHPStan
+            $classLineNum = is_array($classToken) ? (int)$classToken[2] - 1 : 0;
+
+            // Вычисляем правильную строку для вставки (перед атрибутами и модификаторами abstract/final)
+            $injectLine = $classLineNum;
+            for ($i = $classTokenIndex - 1; $i >= 0; $i--) {
+                if (is_array($tokens[$i])) {
+                    if (in_array($tokens[$i][0], [T_ABSTRACT, T_FINAL])) {
+                        $injectLine = $tokens[$i][2] - 1;
+                    } elseif (defined('T_ATTRIBUTE') && $tokens[$i][0] === T_ATTRIBUTE) {
+                        $injectLine = $tokens[$i][2] - 1;
+                    } elseif (!in_array($tokens[$i][0], [T_WHITESPACE, T_COMMENT])) {
+                        break;
+                    }
+                }
+            }
+
+            // Вставляем сгенерированный блок
+            array_splice($lines, $injectLine, 0, $newDoc);
+            file_put_contents($filePath, implode("\n", $lines));
+            $report['modified'][] = $filePath;
+        }
     }
 }
