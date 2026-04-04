@@ -14,6 +14,7 @@ use DevBX\DTO\Attributes\Behavior\Strict;
 use DevBX\DTO\Attributes\Behavior\Hidden;
 use DevBX\DTO\Attributes\Behavior\Masked;
 use DevBX\DTO\Attributes\Behavior\Initialize;
+use DevBX\DTO\Attributes\Behavior\SkipNull;
 use DevBX\DTO\Exceptions\UnmappedPropertiesException;
 use DevBX\DTO\Validation\ValidationResult;
 use DevBX\DTO\Validation\ValidationError;
@@ -101,6 +102,7 @@ abstract class BaseDTO implements JsonSerializable
             $mapToAttr = $prop->getAttributes(MapTo::class);
             $maskedAttr = $prop->getAttributes(Masked::class);
             $initAttr = $prop->getAttributes(Initialize::class); // Поиск нового атрибута
+            $skipNullAttr = $prop->getAttributes(SkipNull::class); // Поиск атрибута SkipNull
 
             $mapFromKey = !empty($mapFromAttr) ? $mapFromAttr[0]->newInstance()->key : null;
             $mapToKey = !empty($mapToAttr) ? $mapToAttr[0]->newInstance()->key : null;
@@ -137,6 +139,7 @@ abstract class BaseDTO implements JsonSerializable
                 'isHidden' => !empty($prop->getAttributes(Hidden::class)),
                 'mask' => !empty($maskedAttr) ? $maskedAttr[0]->newInstance()->mask : null,
                 'isAutoInit' => !empty($initAttr), // Сохраняем флаг инициализации
+                'isSkipNull' => !empty($skipNullAttr), // Сохраняем флаг пропуска null
                 'validators' => $validators
             ];
         }
@@ -270,6 +273,11 @@ abstract class BaseDTO implements JsonSerializable
             if (!$prop->isInitialized($this)) continue;
 
             $value = $propConfig['mask'] ?? $prop->getValue($this);
+
+            if ($value === null && $propConfig['isSkipNull']) {
+                continue;
+            }
+
             $key = $propConfig['exportKeys'][$format];
             $result[$key] = self::exportValue($value, $format);
         }
