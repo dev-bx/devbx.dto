@@ -3,3 +3,5 @@
 .vscode
 .phpunit.cache/
 repomix-output.xml
+vendor
+composer.lock

@@ -2,102 +2,156 @@
 
 namespace DevBX\DTO\Schema;
 
-use InvalidArgumentException;
+use DevBX\DTO\Schema\Exception\SchemaValidationException;
+use DevBX\DTO\Schema\Exception\SchemaVersionException;
+use DevBX\DTO\Schema\Model\SchemaDefinition;
 
-class SchemaValidator implements SchemaValidatorInterface
+class SchemaValidator
 {
-    public function validate(array $schemaData): void
+    private const KNOWN_KEYS = [
+        'root' => ['$schema', 'package', 'enums', 'types', 'collections'],
+        'package' => ['name', 'version', 'codeGen'],
+        'codeGen' => ['php', 'typescript'],
+        'codeGen.php' => ['namespace'],
+        'codeGen.typescript' => ['module'],
+        'enum' => ['backingType', 'values'],
+        'type' => ['abstract', 'extends', 'strict', 'properties', 'computed', 'hooks', 'description'],
+        'property' => ['type', 'items', 'nullable', 'default', 'mapFrom', 'mapTo', 'source', 'sourceKey', 'behavior', 'mask', 'validation', 'description'],
+        'validation' => ['rule', 'value', 'values', 'pattern', 'strict', 'message'],
+        'computed' => ['returnType', 'mapTo'],
+        'hooks' => ['postHydrate', 'preExport'],
+        'collection' => ['itemType', 'description'],
+    ];
+
+    /**
+     * Validates raw schema data (decoded JSON array).
+     *
+     * @throws SchemaVersionException If major version does not match
+     * @throws SchemaValidationException If strict mode is on and unknown keys are found
+     */
+    public function validate(array $data, bool $strict = true): void
     {
-        // 1. Проверка корневых ключей
-        $this->assertKeyExists($schemaData, 'name', 'string');
-        $this->assertKeyExists($schemaData, 'module', 'string');
-        $this->assertKeyExists($schemaData, 'properties', 'array');
+        $this->validateVersion($data);
 
-        // Проверка формата имени класса (только буквы, цифры и underscore)
-        if (!preg_match('/^[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*$/', $schemaData['name'])) {
-            throw new InvalidArgumentException("Invalid 'name' format: {$schemaData['name']}");
-        }
-
-        // 2. Опциональные корневые ключи
-        if (isset($schemaData['imports'])) {
-            $this->assertIsArrayOfArrays($schemaData['imports'], 'imports');
-            foreach ($schemaData['imports'] as $index => $import) {
-                $this->assertKeyExists($import, 'name', 'string', "imports[{$index}]");
-                $this->assertKeyExists($import, 'module', 'string', "imports[{$index}]");
-            }
-        }
-
-        // 3. Проверка свойств (Properties)
-        foreach ($schemaData['properties'] as $propName => $propDef) {
-            if (!is_array($propDef)) {
-                throw new InvalidArgumentException("Property '{$propName}' must be an object/array.");
-            }
-
-            // Обязательные ключи свойства
-            $this->assertKeyExists($propDef, 'type', 'array', "properties.{$propName}");
-            $this->assertKeyExists($propDef, 'isNullable', 'boolean', "properties.{$propName}");
-
-            // Ключ 'default' обязателен (может быть null)
-            if (!array_key_exists('default', $propDef)) {
-                throw new InvalidArgumentException("Missing required key 'default' in properties.{$propName}");
-            }
-
-            $types = $propDef['type'];
-            if (empty($types)) {
-                throw new InvalidArgumentException("Array 'type' cannot be empty in properties.{$propName}");
-            }
-
-            foreach ($types as $typeItem) {
-                if (!is_string($typeItem)) {
-                    throw new InvalidArgumentException("Elements of 'type' must be strings in properties.{$propName}");
-                }
-            }
-
-            // Проверка коллекций и массивов: если это коллекция/массив, должен быть указан 'items'
-            if (in_array('collection', $types, true) || in_array('array', $types, true)) {
-                if (!isset($propDef['items']) || !is_string($propDef['items'])) {
-                    throw new InvalidArgumentException(
-                        "Property '{$propName}' is a collection/array, but missing string 'items' definition."
-                    );
-                }
-            }
-
-            // Опциональные метаданные
-            if (isset($propDef['metadata']) && !is_array($propDef['metadata'])) {
-                throw new InvalidArgumentException("Key 'metadata' must be an object/array in properties.{$propName}");
-            }
+        if ($strict) {
+            $this->validateKeys($data, 'root', '$');
         }
     }
 
     /**
-     * Вспомогательный метод для проверки наличия и типа ключа.
+     * Checks that the $schema version is compatible.
+     *
+     * @throws SchemaVersionException
      */
-    private function assertKeyExists(array $data, string $key, string $expectedType, string $path = 'root'): void
+    private function validateVersion(array $data): void
     {
-        if (!array_key_exists($key, $data)) {
-            throw new InvalidArgumentException("Missing required key '{$key}' in {$path}.");
-        }
-
-        $actualType = gettype($data[$key]);
-        if ($actualType !== $expectedType) {
-            throw new InvalidArgumentException(
-                "Key '{$key}' in {$path} must be of type {$expectedType}, got {$actualType}."
+        if (!isset($data['$schema'])) {
+            throw new SchemaVersionException(
+                SchemaDefinition::SCHEMA_VERSION,
+                '(missing)'
             );
         }
+
+        $expectedMajor = $this->extractMajorVersion(SchemaDefinition::SCHEMA_VERSION);
+        $actualMajor = $this->extractMajorVersion($data['$schema']);
+
+        if ($expectedMajor !== $actualMajor) {
+            throw new SchemaVersionException(SchemaDefinition::SCHEMA_VERSION, $data['$schema']);
+        }
+    }
+
+    private function extractMajorVersion(string $version): string
+    {
+        // "devbx-dto/1.0" → "devbx-dto/1"
+        if (preg_match('/^(.+\/\d+)/', $version, $matches)) {
+            return $matches[1];
+        }
+
+        return $version;
     }
 
     /**
-     * Вспомогательный метод для массивов объектов.
+     * Recursively validates keys at each schema level.
+     *
+     * @throws SchemaValidationException
      */
-    private function assertIsArrayOfArrays(mixed $value, string $path): void
+    private function validateKeys(array $data, string $level, string $path): void
     {
-        if (!is_array($value)) {
-            throw new InvalidArgumentException("Key '{$path}' must be an array.");
+        if (!isset(self::KNOWN_KEYS[$level])) {
+            return;
         }
-        foreach ($value as $index => $item) {
-            if (!is_array($item)) {
-                throw new InvalidArgumentException("Element at {$path}[{$index}] must be an object/array.");
+
+        $allowedKeys = self::KNOWN_KEYS[$level];
+        $unknown = array_diff(array_keys($data), $allowedKeys);
+
+        if (!empty($unknown)) {
+            throw new SchemaValidationException(array_values($unknown), $path);
+        }
+
+        // Recurse into nested structures
+        switch ($level) {
+            case 'root':
+                if (isset($data['package'])) {
+                    $this->validateKeys($data['package'], 'package', '$.package');
+                }
+                if (isset($data['enums'])) {
+                    foreach ($data['enums'] as $name => $enumData) {
+                        $this->validateKeys($enumData, 'enum', "$.enums.{$name}");
+                    }
+                }
+                if (isset($data['types'])) {
+                    foreach ($data['types'] as $name => $typeData) {
+                        $this->validateTypeKeys($typeData, "$.types.{$name}");
+                    }
+                }
+                if (isset($data['collections'])) {
+                    foreach ($data['collections'] as $name => $collData) {
+                        $this->validateKeys($collData, 'collection', "$.collections.{$name}");
+                    }
+                }
+                break;
+
+            case 'package':
+                if (isset($data['codeGen'])) {
+                    $this->validateKeys($data['codeGen'], 'codeGen', "{$path}.codeGen");
+                    if (isset($data['codeGen']['php'])) {
+                        $this->validateKeys($data['codeGen']['php'], 'codeGen.php', "{$path}.codeGen.php");
+                    }
+                    if (isset($data['codeGen']['typescript'])) {
+                        $this->validateKeys($data['codeGen']['typescript'], 'codeGen.typescript', "{$path}.codeGen.typescript");
+                    }
+                }
+                break;
+        }
+    }
+
+    /**
+     * Validates a type definition and its nested structures.
+     */
+    private function validateTypeKeys(array $data, string $path): void
+    {
+        $this->validateKeys($data, 'type', $path);
+
+        if (isset($data['properties'])) {
+            foreach ($data['properties'] as $propName => $propData) {
+                $this->validateKeys($propData, 'property', "{$path}.properties.{$propName}");
+
+                if (isset($propData['validation'])) {
+                    foreach ($propData['validation'] as $i => $ruleData) {
+                        $this->validateKeys($ruleData, 'validation', "{$path}.properties.{$propName}.validation[{$i}]");
+                    }
+                }
             }
+        }
+
+        if (isset($data['computed'])) {
+            foreach ($data['computed'] as $compName => $compData) {
+                $this->validateKeys($compData, 'computed', "{$path}.computed.{$compName}");
+            }
+        }
+
+        if (isset($data['hooks'])) {
+            $this->validateKeys($data['hooks'], 'hooks', "{$path}.hooks");
         }
     }
 }

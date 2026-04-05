@@ -2,105 +2,110 @@
 
 namespace DevBX\DTO\Schema;
 
-use RuntimeException;
-use JsonException;
+use DevBX\DTO\Schema\Model\SchemaDefinition;
+use DevBX\DTO\Schema\Generator\PhpGenerator;
+use DevBX\DTO\Schema\Generator\TypeScriptGenerator;
 
-/**
- * Фасад для управления экспортом и импортом DTO схем.
- * Связывает воедино Validator, Exporter и Importer.
- */
 class DTOSchemaManager
 {
-    public function __construct(
-        private SchemaValidatorInterface $validator,
-        private SchemaExporterInterface $exporter,
-        private SchemaImporterInterface $importer
-    ) {}
-
     /**
-     * Экспортирует PHP-класс в JSON-файл схемы.
-     * * @param class-string $className Полное имя класса (например, 'DevBX\DTO\Models\UserDTO')
-     * @param string $filePath Путь для сохранения JSON файла (например, '/path/to/schema/user.json')
-     * @return bool True в случае успеха
-     * @throws RuntimeException|JsonException
+     * Exports PHP DTO classes from a directory to a JSON schema file.
+     *
+     * @param string $directory Directory containing PHP DTO classes
+     * @param string $baseNamespace Base namespace of the DTO classes
+     * @param string $outputPath Path to write the JSON schema file
+     * @param string $packageName Package name
+     * @param string $packageVersion Package version
+     * @return SchemaDefinition The exported schema
      */
-    public function exportToFile(string $className, string $filePath): bool
-    {
-        if (!class_exists($className)) {
-            throw new \InvalidArgumentException("Class {$className} does not exist.");
+    public static function export(
+        string $directory,
+        string $baseNamespace,
+        string $outputPath,
+        string $packageName,
+        string $packageVersion = '1.0.0'
+    ): SchemaDefinition {
+        $exporter = new SchemaExporter($baseNamespace);
+        $schema = $exporter->export($directory, $packageName, $packageVersion);
+
+        $dir = dirname($outputPath);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
         }
 
-        // 1. Извлекаем данные схемы через Reflection
-        $schemaData = $this->exporter->export($className);
-
-        // 2. Кодируем в JSON с сохранением юникода и красивым форматированием
-        $json = json_encode(
-            $schemaData,
-            JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-        );
-
-        // 3. Сохраняем файл
-        $result = file_put_contents($filePath, $json);
-
+        $result = file_put_contents($outputPath, $schema->toJson());
         if ($result === false) {
-            $error = error_get_last();
-            $errorMessage = $error['message'] ?? 'Unknown error';
-            throw new RuntimeException("Failed to write schema to {$filePath}. Reason: {$errorMessage}");
+            throw new \RuntimeException("Failed to write schema to: {$outputPath}");
         }
 
-        return true;
+        return $schema;
     }
 
     /**
-     * Импортирует JSON-файл схемы и генерирует PHP-класс DTO.
-     * * @param string $filePath Путь к JSON файлу схемы
-     * @param string $outputDirectory Директория для сохранения сгенерированного PHP-класса
-     * @return bool True в случае успеха
-     * @throws RuntimeException|JsonException|\InvalidArgumentException
+     * Imports a JSON schema and generates PHP class files.
+     *
+     * @param string $schemaPath Path to the JSON schema file
+     * @param string $targetDir Directory to write generated PHP files
+     * @param bool $strict Strict mode for schema validation (default: true)
+     * @return string[] List of generated file paths
      */
-    public function importFromFile(string $filePath, string $outputDirectory): bool
+    public static function importPhp(
+        string $schemaPath,
+        string $targetDir,
+        bool $strict = true
+    ): array {
+        $importer = new SchemaImporter();
+        $schema = $importer->fromFile($schemaPath, $strict);
+
+        $generator = new PhpGenerator($schema);
+        return $generator->generate($targetDir);
+    }
+
+    /**
+     * Imports a JSON schema and generates TypeScript files.
+     *
+     * @param string $schemaPath Path to the JSON schema file
+     * @param string $targetDir Directory to write generated TypeScript files
+     * @param bool $strict Strict mode for schema validation (default: true)
+     * @return string[] List of generated file paths
+     */
+    public static function generateTypeScript(
+        string $schemaPath,
+        string $targetDir,
+        bool $strict = true
+    ): array {
+        $importer = new SchemaImporter();
+        $schema = $importer->fromFile($schemaPath, $strict);
+
+        $generator = new TypeScriptGenerator($schema);
+        return $generator->generate($targetDir);
+    }
+
+    /**
+     * Validates a JSON schema file.
+     *
+     * @param string $schemaPath Path to the JSON schema file
+     * @param bool $strict Strict mode (default: true)
+     * @return SchemaDefinition The parsed schema if valid
+     * @throws Exception\SchemaVersionException
+     * @throws Exception\SchemaValidationException
+     */
+    public static function validate(string $schemaPath, bool $strict = true): SchemaDefinition
     {
-        if (!file_exists($filePath)) {
-            throw new RuntimeException("Schema file not found: {$filePath}");
-        }
+        $importer = new SchemaImporter();
+        return $importer->fromFile($schemaPath, $strict);
+    }
 
-        // 1. Читаем и декодируем JSON
-        $json = file_get_contents($filePath);
-        if ($json === false) {
-            $error = error_get_last();
-            $errorMessage = $error['message'] ?? 'Unknown error';
-            throw new RuntimeException("Failed to read schema file: {$filePath}. Reason: {$errorMessage}");
-        }
-
-        $schemaData = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-
-        // 2. Строгая валидация структуры схемы
-        $this->validator->validate($schemaData);
-
-        // 3. Генерация PHP-кода
-        $phpCode = $this->importer->generateCode($schemaData);
-
-        // 4. Подготовка директории и имени файла (приводим к нижнему регистру согласно стандартам проекта)
-        $className = $schemaData['name'];
-        $outputDirectory = rtrim($outputDirectory, '/\\');
-
-        if (!is_dir($outputDirectory)) {
-            if (!mkdir($outputDirectory, 0755, true) && !is_dir($outputDirectory)) {
-                throw new RuntimeException("Failed to create output directory: {$outputDirectory}");
-            }
-        }
-
-        $outPath = $outputDirectory . DIRECTORY_SEPARATOR . strtolower($className) . '.php';
-
-        // 5. Сохранение PHP-файла
-        $result = file_put_contents($outPath, $phpCode);
-
-        if ($result === false) {
-            $error = error_get_last();
-            $errorMessage = $error['message'] ?? 'Unknown error';
-            throw new RuntimeException("Failed to write PHP class to {$outPath}. Reason: {$errorMessage}");
-        }
-
-        return true;
+    /**
+     * Loads a schema from file into an in-memory model.
+     *
+     * @param string $schemaPath Path to the JSON schema file
+     * @param bool $strict Strict mode (default: true)
+     * @return SchemaDefinition
+     */
+    public static function load(string $schemaPath, bool $strict = true): SchemaDefinition
+    {
+        $importer = new SchemaImporter();
+        return $importer->fromFile($schemaPath, $strict);
     }
 }

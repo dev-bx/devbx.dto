@@ -2,223 +2,98 @@
 
 namespace DevBX\DTO\Schema;
 
-class SchemaImporter implements SchemaImporterInterface
+use DevBX\DTO\Schema\Model\SchemaDefinition;
+use DevBX\DTO\Schema\Model\PackageInfo;
+use DevBX\DTO\Schema\Model\TypeDefinition;
+use DevBX\DTO\Schema\Model\PropertyDefinition;
+use DevBX\DTO\Schema\Model\ComputedDefinition;
+use DevBX\DTO\Schema\Model\ValidationRule;
+use DevBX\DTO\Schema\Model\EnumDefinition;
+use DevBX\DTO\Schema\Model\CollectionDefinition;
+
+class SchemaImporter
 {
-    /**
-     * @param string $baseNamespace Базовый неймспейс проекта, к которому будут прибавляться модули.
-     */
-    public function __construct(
-        private string $baseNamespace = 'DevBX\DTO'
-    ) {}
+    private SchemaValidator $validator;
 
-    /**
-     * Генерирует PHP-код класса на основе провалидированной схемы.
-     */
-    public function generateCode(array $schemaData): string
+    public function __construct()
     {
-        $className = $schemaData['name'];
-        $module = $schemaData['module'];
-        $namespace = $this->baseNamespace . '\\' . $module;
-
-        $extends = $schemaData['extends'] ?? 'BaseDTO';
-
-        $needsCastImport = false;
-        $propertiesCode = [];
-
-        foreach ($schemaData['properties'] as $propName => $propDef) {
-            $propertiesCode[] = $this->generatePropertyCode($propName, $propDef, $needsCastImport);
-        }
-
-        $usesCode = $this->generateUsesCode($schemaData, $needsCastImport);
-        $classDocCode = $this->generateDocBlock($schemaData['description'] ?? null);
-
-        $code = "<?php\n\n";
-        $code .= "namespace {$namespace};\n\n";
-
-        if (!empty($usesCode)) {
-            $code .= $usesCode . "\n\n";
-        }
-
-        if ($classDocCode) {
-            $code .= $classDocCode . "\n";
-        }
-
-        $code .= "class {$className}";
-        if ($extends) {
-            $code .= " extends {$extends}";
-        }
-        $code .= "\n{\n";
-
-        $code .= implode("\n", $propertiesCode);
-
-        $code .= "}\n";
-
-        return $code;
+        $this->validator = new SchemaValidator();
     }
 
     /**
-     * Генерирует код для конкретного свойства.
+     * Imports schema from a JSON file path.
+     *
+     * @throws \JsonException
+     * @throws Exception\SchemaVersionException
+     * @throws Exception\SchemaValidationException
      */
-    private function generatePropertyCode(string $propName, array $propDef, bool &$needsCastImport): string
+    public function fromFile(string $filePath, bool $strict = true): SchemaDefinition
     {
-        $lines = [];
-
-        // 1. DocBlock
-        if (!empty($propDef['description'])) {
-            $lines[] = $this->generateDocBlock($propDef['description'], 4);
+        if (!is_file($filePath)) {
+            throw new \InvalidArgumentException("Schema file not found: {$filePath}");
         }
 
-        // 2. Attributes (Cast для массивов объектов)
-        $isCollection = in_array('collection', $propDef['type'], true);
-        $isArray = in_array('array', $propDef['type'], true);
-
-        if ($isArray && !empty($propDef['items'])) {
-            $lines[] = "    #[Cast({$propDef['items']}::class)]";
-            $needsCastImport = true;
+        $json = file_get_contents($filePath);
+        if ($json === false) {
+            throw new \RuntimeException("Failed to read schema file: {$filePath}");
         }
 
-        // 3. Types
-        $phpTypes = [];
-        foreach ($propDef['type'] as $agnosticType) {
-            $phpTypes[] = $this->mapAgnosticTypeToPhp($agnosticType, $propDef['items'] ?? null);
-        }
-
-        $isNullable = $propDef['isNullable'] ?? false;
-        if ($isNullable && !in_array('mixed', $phpTypes, true)) {
-            if (count($phpTypes) === 1) {
-                $typeStr = '?' . $phpTypes[0];
-            } else {
-                $phpTypes[] = 'null';
-                $typeStr = implode('|', $phpTypes);
-            }
-        } else {
-            $typeStr = implode('|', $phpTypes);
-        }
-
-        // 4. Default Value
-        $defaultStr = '';
-        if (array_key_exists('default', $propDef)) {
-            $defaultStr = $this->generateDefaultValueCode($propDef, $phpTypes[0]);
-        }
-
-        // 5. Assembling the property
-        $lines[] = "    public {$typeStr} \${$propName}{$defaultStr};";
-
-        return implode("\n", $lines) . "\n";
+        return $this->fromJson($json, $strict);
     }
 
     /**
-     * Конвертирует абстрактные типы схемы в PHP типы.
+     * Imports schema from a JSON string.
+     *
+     * @throws \JsonException
+     * @throws Exception\SchemaVersionException
+     * @throws Exception\SchemaValidationException
      */
-    private function mapAgnosticTypeToPhp(string $agnosticType, ?string $itemsType): string
+    public function fromJson(string $json, bool $strict = true): SchemaDefinition
     {
-        return match ($agnosticType) {
-            'integer' => 'int',
-            'number' => 'float',
-            'boolean' => 'bool',
-            'collection' => $itemsType ? $itemsType . 'Collection' : 'BaseCollection',
-            'any' => 'mixed',
-            default => $agnosticType // string, array, или имена классов/Enums
-        };
+        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+
+        return $this->fromArray($data, $strict);
     }
 
     /**
-     * Формирует строковое представление значения по умолчанию.
+     * Imports schema from a decoded array.
+     *
+     * @throws Exception\SchemaVersionException
+     * @throws Exception\SchemaValidationException
      */
-    private function generateDefaultValueCode(array $propDef, string $primaryPhpType): string
+    public function fromArray(array $data, bool $strict = true): SchemaDefinition
     {
-        $val = $propDef['default'];
-        $isEnum = $propDef['isEnum'] ?? false;
-        $isCollection = in_array('collection', $propDef['type'], true);
-        $isNullable = $propDef['isNullable'] ?? false;
+        $this->validator->validate($data, $strict);
 
-        if ($val === null) {
-            // Если тип не позволяет null, мы не имеем права писать "= null"
-            // (это вызовет Fatal Error в PHP для строгих типов вроде int).
-            // Оставляем свойство неинициализированным (uninitialized).
-            return $isNullable ? ' = null' : '';
-        }
+        $package = PackageInfo::fromArray($data['package']);
 
-        if ($isEnum) {
-            // Для Enum в схеме хранится имя константы (например, "Active")
-            return " = {$primaryPhpType}::{$val}";
-        }
-
-        if ($isCollection) {
-            // Если коллекция по умолчанию пустая, инициализируем инстанс
-            return " = new {$primaryPhpType}()";
-        }
-
-        if (is_string($val)) {
-            return " = '" . addslashes($val) . "'";
-        }
-
-        if (is_bool($val)) {
-            return $val ? ' = true' : ' = false';
-        }
-
-        if (is_array($val)) {
-            return ' = []';
-        }
-
-        return " = {$val}";
-    }
-
-    /**
-     * Генерирует блок `use` на основе импортов из схемы.
-     */
-    private function generateUsesCode(array $schemaData, bool $needsCastImport): string
-    {
-        $uses = [];
-        $currentModule = $schemaData['module'];
-
-        // Всегда импортируем базовые классы, если они находятся не в текущем модуле
-        if ($schemaData['extends'] === 'BaseDTO' && $currentModule !== '') {
-            $uses[] = "use {$this->baseNamespace}\\BaseDTO;";
-        }
-
-        if ($needsCastImport) {
-            $uses[] = "use Local\\Lib\\DTO\\Attributes\\Cast;";
-        }
-
-        if (!empty($schemaData['imports'])) {
-            foreach ($schemaData['imports'] as $import) {
-                // Импортируем только если класс лежит в другом модуле
-                if ($import['module'] !== $currentModule) {
-                    $fqcn = $this->baseNamespace . '\\' . $import['module'] . '\\' . $import['name'];
-                    $uses[] = "use {$fqcn};";
-                }
+        $enums = [];
+        if (isset($data['enums'])) {
+            foreach ($data['enums'] as $name => $enumData) {
+                $enums[$name] = EnumDefinition::fromArray($name, $enumData);
             }
         }
 
-        if (empty($uses)) {
-            return '';
+        $types = [];
+        if (isset($data['types'])) {
+            foreach ($data['types'] as $name => $typeData) {
+                $types[$name] = TypeDefinition::fromArray($name, $typeData);
+            }
         }
 
-        $uses = array_unique($uses);
-        sort($uses); // Сортируем импорты по алфавиту для красоты кода
-
-        return implode("\n", $uses);
-    }
-
-    /**
-     * Оборачивает текст описания в PHPDoc.
-     */
-    private function generateDocBlock(?string $description, int $indent = 0): ?string
-    {
-        if (empty($description)) {
-            return null;
+        $collections = [];
+        if (isset($data['collections'])) {
+            foreach ($data['collections'] as $name => $collData) {
+                $collections[$name] = CollectionDefinition::fromArray($name, $collData);
+            }
         }
 
-        $spaces = str_repeat(' ', $indent);
-        $lines = explode("\n", $description);
-
-        $doc = $spaces . "/**\n";
-        foreach ($lines as $line) {
-            $doc .= $spaces . " * " . trim($line) . "\n";
-        }
-        $doc .= $spaces . " */";
-
-        return $doc;
+        return new SchemaDefinition(
+            package: $package,
+            enums: $enums,
+            types: $types,
+            collections: $collections,
+            schema: $data['$schema']
+        );
     }
 }
