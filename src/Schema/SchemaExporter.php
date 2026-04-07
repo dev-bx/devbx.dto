@@ -172,7 +172,8 @@ class SchemaExporter
     }
 
     /**
-     * @param ReflectionClass<object> $reflection
+     * @template T of object
+     * @param ReflectionClass<T> $reflection
      */
     private function exportType(ReflectionClass $reflection, string $schemaName): TypeDefinition
     {
@@ -483,7 +484,8 @@ class SchemaExporter
     }
 
     /**
-     * @param ReflectionClass<object> $reflection
+     * @template T of object
+     * @param ReflectionClass<T> $reflection
      */
     private function exportCollection(ReflectionClass $reflection, string $schemaName): CollectionDefinition
     {
@@ -506,7 +508,8 @@ class SchemaExporter
     }
 
     /**
-     * @param ReflectionClass<\BackedEnum> $reflection
+     * @template T of \BackedEnum
+     * @param ReflectionClass<T> $reflection
      */
     private function exportEnum(ReflectionClass $reflection, string $schemaName): EnumDefinition
     {
@@ -556,7 +559,8 @@ class SchemaExporter
      * For properties: also extracts inline description from @var tag
      * (e.g. "@var string|null Some description" → "Some description").
      *
-     * @param ReflectionClass<object>|ReflectionProperty $reflector
+     * @template T of object
+     * @param ReflectionClass<T>|ReflectionProperty $reflector
      */
     private function extractDescription(ReflectionClass|ReflectionProperty $reflector): ?string
     {
