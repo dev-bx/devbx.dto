@@ -467,7 +467,7 @@ class TypeScriptGenerator
         if (is_string($value)) return "'" . addslashes($value) . "'";
         if (is_array($value)) {
             if (empty($value)) return '[]';
-            return json_encode($value);
+            return (string) json_encode($value);
         }
         return 'null';
     }

@@ -1,27 +1,42 @@
 {
-  "$schema": "https://dev-bx.ru/schema/agnostic-dto-schema.json",
-  "name": "GeneratedUserDTO",
-  "module": "Models",
-  "extends": "BaseDTO",
-  "description": "Тестовый DTO сгенерированный из схемы",
-  "imports": [],
-  "properties": {
-    "id": {
-      "type": ["integer"],
-      "isNullable": false,
-      "default": null,
-      "description": "Идентификатор"
+    "$schema": "devbx-dto/1.0",
+    "package": {
+        "name": "test-fixtures",
+        "version": "1.0.0",
+        "codeGen": {
+            "php": {
+                "namespace": "Tests\\DevBX\\DTO\\Generated"
+            }
+        }
     },
-    "isActive": {
-      "type": ["boolean"],
-      "isNullable": true,
-      "default": true
-    },
-    "tags": {
-      "type": ["array"],
-      "items": "string",
-      "isNullable": false,
-      "default": []
+    "types": {
+        "UserDTO": {
+            "description": "Test user DTO",
+            "properties": {
+                "id": {
+                    "type": "int"
+                },
+                "name": {
+                    "type": "string",
+                    "nullable": true,
+                    "default": null
+                },
+                "isActive": {
+                    "type": "bool",
+                    "nullable": true,
+                    "default": true
+                },
+                "tags": {
+                    "type": "array",
+                    "default": []
+                },
+                "email": {
+                    "type": "string",
+                    "nullable": true,
+                    "default": null,
+                    "mapFrom": "email_address"
+                }
+            }
+        }
     }
-  }
 }

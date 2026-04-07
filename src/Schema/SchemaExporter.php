@@ -69,6 +69,7 @@ class SchemaExporter
         $enums = [];
         $collections = [];
 
+        /** @var class-string $fqcn */
         foreach ($this->classMap as $fqcn => $schemaName) {
             $reflection = new ReflectionClass($fqcn);
 
@@ -170,6 +171,9 @@ class SchemaExporter
         return null;
     }
 
+    /**
+     * @param ReflectionClass<object> $reflection
+     */
     private function exportType(ReflectionClass $reflection, string $schemaName): TypeDefinition
     {
         $properties = [];
@@ -478,6 +482,9 @@ class SchemaExporter
         return $rules;
     }
 
+    /**
+     * @param ReflectionClass<object> $reflection
+     */
     private function exportCollection(ReflectionClass $reflection, string $schemaName): CollectionDefinition
     {
         $itemType = 'any';
@@ -498,12 +505,17 @@ class SchemaExporter
         );
     }
 
+    /**
+     * @param ReflectionClass<\BackedEnum> $reflection
+     */
     private function exportEnum(ReflectionClass $reflection, string $schemaName): EnumDefinition
     {
         $backingType = 'string';
         $values = [];
 
-        $cases = $reflection->getName()::cases();
+        /** @var class-string<\BackedEnum> $enumClass */
+        $enumClass = $reflection->getName();
+        $cases = $enumClass::cases();
         if (!empty($cases)) {
             $first = $cases[0];
             $backingType = is_int($first->value) ? 'int' : 'string';
@@ -543,6 +555,8 @@ class SchemaExporter
      * For classes: keeps only plain text lines, filters out @-tags.
      * For properties: also extracts inline description from @var tag
      * (e.g. "@var string|null Some description" → "Some description").
+     *
+     * @param ReflectionClass<object>|ReflectionProperty $reflector
      */
     private function extractDescription(ReflectionClass|ReflectionProperty $reflector): ?string
     {
@@ -587,8 +601,7 @@ class SchemaExporter
             return null;
         }
 
-        $description = implode("\n", $textLines);
-        return $description === '' ? null : $description;
+        return implode("\n", $textLines);
     }
 
     /**
