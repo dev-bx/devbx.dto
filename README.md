@@ -285,20 +285,32 @@ echo $code;
 
 ### Импорт и экспорт JSON-схем (DTOSchemaManager)
 
-Библиотека поддерживает конвертацию DTO в языково-независимые JSON-схемы (полезно для OpenAPI/Swagger, TypeScript или межсервисного взаимодействия) и обратно в PHP-код.
+Библиотека поддерживает конвертацию DTO в языково-независимые JSON-схемы формата `devbx-dto/1.0` и обратную генерацию PHP/TypeScript кода. Схема сохраняет все атрибуты библиотеки, PHPDoc-описания классов и свойств, и может использоваться для межсервисного взаимодействия или генерации клиентского кода.
 
 ```php
 use DevBX\DTO\Schema\DTOSchemaManager;
-use DevBX\DTO\Schema\SchemaExporter;
-use DevBX\DTO\Schema\SchemaImporter;
-use DevBX\DTO\Schema\SchemaValidator;
 
-$manager = new DTOSchemaManager(new SchemaValidator(), new SchemaExporter(), new SchemaImporter());
+// 1. Экспорт директории с DTO-классами в JSON-схему
+DTOSchemaManager::export(
+    directory: '/path/to/src/DTO',
+    baseNamespace: 'App\\DTO',
+    outputPath: '/path/to/schema.json',
+    packageName: 'my-api'
+);
 
-// 1. Экспорт PHP-класса в JSON-файл
-$manager->exportToFile(UserDTO::class, '/path/to/schema.json');
+// 2. Генерация PHP-кода из JSON-схемы
+DTOSchemaManager::importPhp(
+    schemaPath: '/path/to/schema.json',
+    targetDir: '/path/to/generated'
+);
 
-// 2. Генерация PHP-кода на основе JSON-файла
-$manager->importFromFile('/path/to/schema.json', '/path/to/output/dir');
+// 3. Генерация TypeScript-кода из той же схемы
+DTOSchemaManager::generateTypeScript(
+    schemaPath: '/path/to/schema.json',
+    targetDir: '/path/to/ts-generated'
+);
+
+// 4. Валидация схемы (strict mode по умолчанию — неизвестные ключи вызывают исключение)
+DTOSchemaManager::validate('/path/to/schema.json');
 
 ```
